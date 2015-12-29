@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2013-2014 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2013-2015 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,6 +39,7 @@
  * @author Thomas Gubler <thomasgubler@gmail.com>
  * @author Anton Babushkin <anton.babushkin@me.com>
  * @author Ban Siesta <bansiesta@gmail.com>
+ * @author Lorenz Meier <lorenz@px4.io>
  */
 
 #ifndef NAVIGATOR_MISSION_H
@@ -87,7 +88,8 @@ public:
 		MISSION_YAWMODE_NONE = 0,
 		MISSION_YAWMODE_FRONT_TO_WAYPOINT = 1,
 		MISSION_YAWMODE_FRONT_TO_HOME = 2,
-		MISSION_YAWMODE_BACK_TO_HOME = 3
+		MISSION_YAWMODE_BACK_TO_HOME = 3,
+		MISSION_YAWMODE_MAX = 4
 	};
 
 private:
@@ -132,6 +134,8 @@ private:
 	 */
 	void altitude_sp_foh_reset();
 
+	float get_absolute_altitude_for_item(struct mission_item_s &mission_item);
+
 	/**
 	 * Read current or next mission item from the dataman and watch out for DO_JUMPS
 	 * @return true if successful
@@ -163,6 +167,11 @@ private:
 	 */
 	void set_mission_finished();
 
+	/**
+	 * Check wether a mission is ready to go
+	 */
+	bool check_mission_valid();
+
 	control::BlockParamInt _param_onboard_enabled;
 	control::BlockParamFloat _param_takeoff_alt;
 	control::BlockParamFloat _param_dist_1wp;
@@ -184,7 +193,7 @@ private:
 	} _mission_type;
 
 	bool _inited;
-	bool _dist_1wp_ok;
+	bool _home_inited;
 
 	MissionFeasibilityChecker _missionFeasiblityChecker; /**< class that checks if a mission is feasible */
 
