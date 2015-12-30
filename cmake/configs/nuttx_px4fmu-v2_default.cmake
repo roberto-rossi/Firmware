@@ -161,6 +161,8 @@ set(config_module_list
 	# https://px4.io/dev/example_fixedwing_control
 	#examples/fixedwing_control
 
+	examples/px4_dynamixel
+
 	# Hardware test
 	#examples/hwtest
 )
