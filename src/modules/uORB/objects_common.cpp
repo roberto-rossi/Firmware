@@ -273,3 +273,32 @@ ORB_DEFINE(camera_trigger, struct camera_trigger_s);
 
 #include "topics/vehicle_command_ack.h"
 ORB_DEFINE(vehicle_command_ack, struct vehicle_command_ack_s);
+
+//MODIFICA per invio delle matrici
+#include "topics/B_matrix.h"
+ORB_DEFINE(B_matrix, struct B_matrix_s);
+
+#include "topics/Bb_tb_i_matrix.h"
+ORB_DEFINE(Bb_tb_i_matrix, struct Bb_tb_i_matrix_s);
+
+#include "topics/Bb_tb_i_pinv_matrix.h"
+ORB_DEFINE(Bb_tb_i_pinv_matrix, struct Bb_tb_i_pinv_matrix_s);
+
+#include "topics/T_bw_matrix.h"
+ORB_DEFINE(T_bw_matrix, struct T_bw_matrix_s);
+
+#include "topics/g_matrix.h"
+ORB_DEFINE(g_matrix, struct g_matrix_s);
+
+#include "topics/csi_r.h"
+ORB_DEFINE(csi_r, struct csi_r_s);
+
+#include "topics/csi_dot_r.h"
+ORB_DEFINE(csi_dot_r, struct csi_dot_r_s);
+
+#include "topics/csi.h"
+ORB_DEFINE(csi, struct csi_s);
+
+#include "topics/csi_dot.h"
+ORB_DEFINE(csi_dot, struct csi_dot_s);
+//FINE MODIFICA
