@@ -662,7 +662,7 @@ void MavlinkReceiver::handle_message_B2_matrix(mavlink_message_t *msg)
 
     //memset(&f, 0, sizeof(f));
 
-    memcpy(f.B+sizeof(matrix.value)/2,matrix.value,sizeof(matrix.value)); //ADATTO SOLO SE LA MATRICE è PERFETTAMENTE DIVISA IN 2!!!
+    memcpy(f.B+50,matrix.value,sizeof(matrix.value)); //ADATTO SOLO SE LA MATRICE è PERFETTAMENTE DIVISA IN 2!!!
     f.timestamp = hrt_absolute_time();
 
     if (_B2_pub == nullptr) {
