@@ -222,6 +222,7 @@ private:
 	orb_advert_t _g_pub;
 	orb_advert_t _csi_r_pub;
 	orb_advert_t _csi_dot_r_pub;
+	int _B_sub;
 	//FINE MODIFICA
 	int _control_mode_sub;
 	int _hil_frames;

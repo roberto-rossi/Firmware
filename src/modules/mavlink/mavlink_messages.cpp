@@ -2750,7 +2750,6 @@ protected:
         if (_csi_sub->update(&_csi_time, &csi)) {
             mavlink_csi_matrix_t msg;
             msg.time_usec = t;
-            //msg.value = csi.csi;
             memcpy(msg.value, csi.csi, sizeof(msg.value));
             _mavlink->send_message(MAVLINK_MSG_ID_CSI_MATRIX, &msg);
         }

@@ -134,6 +134,7 @@ MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
     _g_pub(nullptr),
     _csi_r_pub(nullptr),
     _csi_dot_r_pub(nullptr),
+    _B_sub(0),
     //FINE MODIFICA
 	_control_mode_sub(orb_subscribe(ORB_ID(vehicle_control_mode))),
 	_hil_frames(0),
@@ -637,10 +638,12 @@ void MavlinkReceiver::handle_message_B1_matrix(mavlink_message_t *msg)
     mavlink_msg_b1_matrix_decode(msg, &matrix);
     struct B_matrix_s f;
 
-    int _B_sub = orb_subscribe(ORB_ID(B_matrix));
-    orb_copy(ORB_ID(B_matrix), _B_sub, &f);
+    memset(&f, 0, sizeof(f));
 
-    //memset(&f, 0, sizeof(f));
+    if (_B1_pub == nullptr) {
+        _B_sub = orb_subscribe(ORB_ID(B_matrix));
+       }
+    orb_copy(ORB_ID(B_matrix), _B_sub, &f);
 
     memcpy(f.B,matrix.value,sizeof(matrix.value));
     f.timestamp = hrt_absolute_time();
@@ -657,13 +660,24 @@ void MavlinkReceiver::handle_message_B2_matrix(mavlink_message_t *msg)
     mavlink_msg_b2_matrix_decode(msg, &matrix);
     struct B_matrix_s f;
 
-    int _B_sub = orb_subscribe(ORB_ID(B_matrix));
+    memset(&f, 0, sizeof(f));
+
+    if (_B1_pub == nullptr) {
+            _B_sub = orb_subscribe(ORB_ID(B_matrix));
+           }
     orb_copy(ORB_ID(B_matrix), _B_sub, &f);
 
-    //memset(&f, 0, sizeof(f));
-
-    memcpy(f.B+50,matrix.value,sizeof(matrix.value)); //ADATTO SOLO SE LA MATRICE è PERFETTAMENTE DIVISA IN 2!!!
+    memcpy(f.B+50,matrix.value,sizeof(matrix.value));
     f.timestamp = hrt_absolute_time();
+
+    printf("B: \n");
+    for(int i = 0; i < 10; i++) {
+        for(int j = 0; j < 10; j++) {
+            printf("%f ", (double)f.B[(i*10)+j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
 
     if (_B2_pub == nullptr) {
         _B2_pub = orb_advertise(ORB_ID(B_matrix), &f);
@@ -681,6 +695,14 @@ void MavlinkReceiver::handle_message_Bb_tb_i_matrix(mavlink_message_t *msg)
 
     memcpy(f.Bb_tb_i,matrix.value,sizeof(matrix.value));
     f.timestamp = hrt_absolute_time();
+
+    for(int i = 0; i < 8; i++) {
+        for(int j = 0; j < 6; j++) {
+            printf("%f ", (double)matrix.value[(i*6)+j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
 
     if (_Bb_tb_i_pub == nullptr) {
         _Bb_tb_i_pub = orb_advertise(ORB_ID(Bb_tb_i_matrix), &f);
