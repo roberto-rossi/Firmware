@@ -169,6 +169,7 @@ Mavlink::Mavlink() :
 	_flow_control_enabled(true),
 	_last_write_success_time(0),
 	_last_write_try_time(0),
+	_mavlink_start_time(0),
 	_bytes_tx(0),
 	_bytes_txerr(0),
 	_bytes_rx(0),
@@ -788,6 +789,7 @@ Mavlink::enable_flow_control(bool enabled)
 {
 	// We can't do this on USB - skip
 	if (_is_usb_uart) {
+		_flow_control_enabled = false;
 		return OK;
 	}
 
@@ -843,7 +845,7 @@ Mavlink::get_free_tx_buf()
 	 */
 	int buf_free = 0;
 
-	// if we are using network sockets, return max lenght of one packet
+	// if we are using network sockets, return max length of one packet
 	if (get_protocol() == UDP || get_protocol() == TCP ) {
 		return  1500;
 	} else {
@@ -884,6 +886,10 @@ Mavlink::send_message(const uint8_t msgid, const void *msg, uint8_t component_ID
 	unsigned packet_len = payload_len + MAVLINK_NUM_NON_PAYLOAD_BYTES;
 
 	_last_write_try_time = hrt_absolute_time();
+
+	if (_mavlink_start_time == 0) {
+		_mavlink_start_time = _last_write_try_time;
+	}
 
 	if (get_protocol() == SERIAL) {
 		/* check if there is space in the buffer, let it overflow else */
@@ -937,6 +943,7 @@ Mavlink::send_message(const uint8_t msgid, const void *msg, uint8_t component_ID
 
 		/* resend heartbeat via broadcast */
 		if ((_mode != MAVLINK_MODE_ONBOARD)
+			&& (_mavlink_start_time > 0 && (hrt_elapsed_time(&_mavlink_start_time) > 4 * 1000 * 1000))
 			&& (((hrt_elapsed_time(&tstatus.heartbeat_time) > 3 * 1000 * 1000) ||
 			(tstatus.heartbeat_time == 0)) &&
 			msgid == MAVLINK_MSG_ID_HEARTBEAT)) {
@@ -1045,13 +1052,13 @@ Mavlink::init_udp()
 		return;
 	}
 
-	/* set default target address, but not for onboard mode (will be set on first recieved packet) */
+	/* set default target address, but not for onboard mode (will be set on first received packet) */
 	memset((char *)&_src_addr, 0, sizeof(_src_addr));
 	if (_mode != MAVLINK_MODE_ONBOARD) {
-		set_client_source_initialized();
 		_src_addr.sin_family = AF_INET;
 		inet_aton("127.0.0.1", &_src_addr.sin_addr);
 		_src_addr.sin_port = htons(DEFAULT_REMOTE_PORT_UDP);
+		set_client_source_initialized();
 	}
 
 	/* default broadcast address */
@@ -1459,7 +1466,7 @@ Mavlink::update_rate_mult()
 	/* scale down if we have a TX err rate suggesting link congestion */
 	if (_rate_txerr > 0.0f && !radio_critical) {
 		hardware_mult = (_rate_tx) / (_rate_tx + _rate_txerr);
-	} else if (radio_found && tstatus.timestamp != _last_hw_rate_timestamp) {
+	} else if (radio_found && tstatus.telem_time != _last_hw_rate_timestamp) {
 
 		if (tstatus.txbuf < RADIO_BUFFER_CRITICAL_LOW_PERCENTAGE) {
 			/* this indicates link congestion, reduce rate by 20% */
@@ -1473,12 +1480,13 @@ Mavlink::update_rate_mult()
 			/* limit to a max multiplier of 1 */
 			hardware_mult = fminf(1.0f, hardware_mult);
 		}
-	} else {
+
+	} else if (!radio_found) {
 		/* no limitation, set hardware to 1 */
 		hardware_mult = 1.0f;
 	}
 
-	_last_hw_rate_timestamp = tstatus.timestamp;
+	_last_hw_rate_timestamp = tstatus.telem_time;
 
 	/* pick the minimum from bandwidth mult and hardware mult as limit */
 	_rate_mult = fminf(bandwidth_mult, hardware_mult);
@@ -1754,6 +1762,7 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("EXTENDED_SYS_STATE", 1.0f);
 		configure_stream("ALTITUDE", 1.0f);
 		configure_stream("VISION_POSITION_NED", 10.0f);
+		configure_stream("NAMED_VALUE_FLOAT", 1.0f);
 		break;
 
 	case MAVLINK_MODE_ONBOARD:
@@ -1782,6 +1791,7 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("EXTENDED_SYS_STATE", 2.0f);
 		configure_stream("ALTITUDE", 10.0f);
 		configure_stream("VISION_POSITION_NED", 10.0f);
+		configure_stream("NAMED_VALUE_FLOAT", 10.0f);
 		break;
 
 	case MAVLINK_MODE_OSD:
@@ -1792,7 +1802,6 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("GLOBAL_POSITION_INT", 10.0f);
 		configure_stream("HOME_POSITION", 0.5f);
 		configure_stream("ATTITUDE_TARGET", 10.0f);
-		configure_stream("BATTERY_STATUS", 1.0f);
 		configure_stream("SYSTEM_TIME", 1.0f);
 		configure_stream("RC_CHANNELS", 5.0f);
 		configure_stream("SERVO_OUTPUT_RAW_0", 1.0f);
@@ -1810,7 +1819,7 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("HOME_POSITION", 0.5f);
 		configure_stream("GLOBAL_POSITION_INT", 10.0f);
 		configure_stream("ATTITUDE_TARGET", 8.0f);
-		configure_stream("PARAM_VALUE", 300.0f);
+		//configure_stream("PARAM_VALUE", 300.0f);
 		configure_stream("MISSION_ITEM", 50.0f);
 		configure_stream("NAMED_VALUE_FLOAT", 50.0f);
 		configure_stream("OPTICAL_FLOW_RAD", 10.0f);
@@ -1830,7 +1839,7 @@ Mavlink::task_main(int argc, char *argv[])
 		configure_stream("EXTENDED_SYS_STATE", 2.0f);
 		configure_stream("ALTITUDE", 10.0f);
 		configure_stream("VISION_POSITION_NED", 10.0f);
-
+		configure_stream("NAMED_VALUE_FLOAT", 50.0f);
 	default:
 		break;
 	}
@@ -2137,7 +2146,7 @@ Mavlink::start(int argc, char *argv[])
 	px4_task_spawn_cmd(buf,
 			   SCHED_DEFAULT,
 			   SCHED_PRIORITY_DEFAULT,
-			   2400,
+			   2700,
 			   (px4_main_t)&Mavlink::start_helper,
 			   (char *const *)argv);
 
@@ -2199,6 +2208,7 @@ Mavlink::display_status()
 		printf("\tremote noise:\t%u\n", _rstatus.remote_noise);
 		printf("\trx errors:\t%u\n", _rstatus.rxerrors);
 		printf("\tfixed:\t\t%u\n", _rstatus.fixed);
+		printf("\tflow control:\t%s\n", (_flow_control_enabled) ? "ON" : "OFF");
 
 	} else {
 		printf("\tno telem status.\n");
