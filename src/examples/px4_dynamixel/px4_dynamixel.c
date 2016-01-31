@@ -38,34 +38,71 @@
  * @author Example User <mail@example.com>
  */
 
-#include <px4_config.h>
-#include <unistd.h>
-#include <stdio.h>
 #include <poll.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
+#include <px4_config.h>
 #include <uORB/uORB.h>
-#include <uORB/topics/sensor_combined.h>
-#include <uORB/topics/vehicle_attitude.h>
-
 #include "dynamixel.h"
-
 
 __EXPORT int px4_dynamixel_main(int argc, char *argv[]);
 
 int px4_dynamixel_main(int argc, char *argv[])
 {
-	int res;
+    /*   if (argc < 2) {
+            printf("Missing command \n");
+            return 1;
+        }
+
+    if (!strcmp(argv[1], "initialize")) {
+        int res;
+        res = dxl_initialize(1,1);
+        if (!res)
+            printf("Error in initialization Dynamixel!\n");
+        printf("Initialization result: %d \n",res);
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "terminate")) {
+        dxl_terminate();
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "readword")) {
+        int res;
+        res = dxl_read_word(1,36);
+        printf("Present position: %d \n", res);
+        return 0;
+    }
+
+    if (!strcmp(argv[1], "writeword")) {
+        dxl_write_word(1,30,450);
+        printf("Write position setpoint \n");
+        return 0;
+    }
+  printf("Wrong command \n");
+  */
+//
+    int res;
     int c = 0;
 	printf("Test Dynamixel!\n");
-	res = dxl_initialize(1,1);
-	if (!res)
-	    printf("Error in initialization Dynamixel!");
-	while (c<10000){
-	dxl_write_word(1,30,300);
+
+    res = dxl_initialize(1,200);
+    if (!res)
+        printf("Error in initialization Dynamixel!\n");
+    printf("Initialization result: %d \n",res);
+
+	while (c<1){
+	//dxl_write_word(1,32,10);
+	//dxl_write_word(1,30,450);
 	//dxl_write_word(1,32,100);
 	c++;
     }
-	dxl_read_word(1,30);
+	res = dxl_read_word(1,36);
+	printf("Read present position: %d \n",res);
+//
 	return 0;
 }

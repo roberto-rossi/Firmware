@@ -1,13 +1,21 @@
 // Dynamixel SDK platform dependent source
+
 #include "dxl_hal.h"
 
+//#include <bits/fcntl-linux.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
-#include <sys/ioctl.h>
-#include <systemlib/err.h>
-#include <termios.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/time.h>
+#include <termios.h>
+#include <unistd.h>
+
+//#include "../../../NuttX/nuttx/include/nuttx/fs/ioctl.h"
+//#include "../../../NuttX/nuttx/include/nuttx/serial/tioctl.h"
+
+#include "../../../src/drivers/hott/comms.cpp"
 
 long	glStartTime	= 0;
 float	gfRcvWaitTime	= 0.0f;
@@ -32,11 +40,13 @@ int dxl_hal_open( int devIndex, float baudrate )
 	speed_t speed = baudrate;
 	gfByteTransTime = (float)((1000.0f / baudrate) * 12.0f);
 
+	dxl_hal_close();
+
 	/* open uart */
 	uart = open(device, O_RDWR|O_NOCTTY|O_NONBLOCK); //O_NONBLOCK aggiunto come da driver linux
 
 	if (uart < 0) {
-		err(1, "ERR: opening %s", device);
+		printf("ERR: opening %s", device);
 	}
 
 	/* Back up the original uart configuration to restore it after exit */
@@ -45,7 +55,7 @@ int dxl_hal_open( int devIndex, float baudrate )
 
 	if ((termios_state = tcgetattr(uart, &uart_config_original)) < 0) {
 		close(uart);
-		err(1, "ERR: %s: %d", device, termios_state);
+		printf("ERR: %s: %d", device, termios_state);
 	}
 
 	/* Fill the struct for the new configuration */
@@ -58,13 +68,13 @@ int dxl_hal_open( int devIndex, float baudrate )
 	/* Set baud rate */
 	if (cfsetispeed(&uart_config, speed) < 0 || cfsetospeed(&uart_config, speed) < 0) {
 		close(uart);
-		err(1, "ERR: %s: %d (cfsetispeed, cfsetospeed)",
+		printf("ERR: %s: %d (cfsetispeed, cfsetospeed)",
 		    device, termios_state);
 	}
 
 	if ((termios_state = tcsetattr(uart, TCSANOW, &uart_config)) < 0) {
 		close(uart);
-		err(1, "ERR: %s (tcsetattr)", device);
+		printf("ERR: %s (tcsetattr)", device);
 	}
 
 	/* Activate single wire mode */
@@ -98,7 +108,7 @@ int dxl_hal_tx( unsigned char *pPacket, int numPacket )
 	int numWritePacket = write(uart, pPacket, numPacket);
 	uint8_t dummy[numPacket];
 	read(uart, &dummy, numPacket);
-
+	printf("numTxPacket: %d\n",numPacket);
 	return numWritePacket;
 }
 
@@ -109,6 +119,7 @@ int dxl_hal_rx( unsigned char *pPacket, int numPacket )
 	// numPacket: number of data array
 	// Return: number of data recieved. -1 is error.
 	memset(pPacket, 0, numPacket);
+	usleep(2000); // ~1.5ms
 	return read(uart, pPacket, numPacket);
 }
 

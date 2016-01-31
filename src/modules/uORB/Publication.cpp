@@ -52,6 +52,18 @@
 #include "topics/rc_channels.h"
 #include "topics/filtered_bottom_flow.h"
 
+//MODIFICA per invio delle matrici
+#include "topics/B_matrix.h"
+#include "topics/Bb_tb_i_matrix.h"
+#include "topics/Bb_tb_i_pinv_matrix.h"
+#include "topics/T_bw_matrix.h"
+#include "topics/g_matrix.h"
+#include "topics/csi_r.h"
+#include "topics/csi_dot_r.h"
+#include "topics/csi.h"
+#include "topics/csi_dot.h"
+//FINE MODIFICA
+
 #include <px4_defines.h>
 
 namespace uORB
@@ -121,5 +133,17 @@ template class __EXPORT Publication<encoders_s>;
 template class __EXPORT Publication<tecs_status_s>;
 template class __EXPORT Publication<rc_channels_s>;
 template class __EXPORT Publication<filtered_bottom_flow_s>;
+
+//MODIFICA per invio delle matrici
+template class __EXPORT Publication<B_matrix_s>;
+template class __EXPORT Publication<Bb_tb_i_matrix_s>;
+template class __EXPORT Publication<Bb_tb_i_pinv_matrix_s>;
+template class __EXPORT Publication<T_bw_matrix_s>;
+template class __EXPORT Publication<g_matrix_s>;
+template class __EXPORT Publication<csi_r_s>;
+template class __EXPORT Publication<csi_dot_r_s>;
+template class __EXPORT Publication<csi_s>;
+template class __EXPORT Publication<csi_dot_s>;
+//FINE MODIFICA
 
 }
