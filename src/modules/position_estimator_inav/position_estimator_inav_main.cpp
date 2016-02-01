@@ -90,8 +90,8 @@ static const hrt_abstime vision_topic_timeout = 500000;	// Vision topic timeout 
 static const hrt_abstime mocap_topic_timeout = 500000;		// Mocap topic timeout = 0.5s
 static const hrt_abstime gps_topic_timeout = 500000;		// GPS topic timeout = 0.5s
 static const hrt_abstime flow_topic_timeout = 1000000;	// optical flow topic timeout = 1s
-static const hrt_abstime lidar_timeout = 150000;	// lidar timeout = 150ms
-static const hrt_abstime lidar_valid_timeout = 1000000;	// estimate lidar distance during this time after lidar loss
+static const hrt_abstime sonar_timeout = 150000;	// sonar timeout = 150ms
+static const hrt_abstime sonar_valid_timeout = 1000000;	// estimate sonar distance during this time after sonar loss
 static const unsigned updates_counter_len = 1000000;
 static const float max_flow = 1.0f;	// max flow value that can be used, rad/s
 
@@ -261,8 +261,9 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 	int baro_init_cnt = 0;
 	int baro_init_num = 200;
 	float baro_offset = 0.0f;		// baro offset for reference altitude, initialized on start, then adjusted
-	float surface_offset = 0.0f;	// ground level offset from reference altitude
-	float surface_offset_rate = 0.0f;	// surface offset change rate
+//	float surface_offset = 0.0f;	// ground level offset from reference altitude
+//	float surface_offset_rate = 0.0f;	// surface offset change rate
+	float baro_filtered = 0.0f;
 
 	hrt_abstime accel_timestamp = 0;
 	hrt_abstime baro_timestamp = 0;
@@ -310,16 +311,18 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 		{ 0.0f },		// D (pos)
 	};
 
-	float corr_lidar = 0.0f;
-	float corr_lidar_filtered = 0.0f;
+	float corr_sonar = 0.0f;
+//	float corr_sonar_filtered = 0.0f;
+	float sonar_filtered = 0.0f;
+	float sonar_corrected = 0.0f;
 
 	float corr_flow[] = { 0.0f, 0.0f };	// N E
 	float w_flow = 0.0f;
 
-	float lidar_prev = 0.0f;
+	float sonar_prev = 0.0f;
 	//hrt_abstime flow_prev = 0;			// time of last flow measurement
-	hrt_abstime lidar_time = 0;			// time of last lidar measurement (not filtered)
-	hrt_abstime lidar_valid_time = 0;	// time of last lidar measurement used for correction (filtered)
+	hrt_abstime sonar_time = 0;			// time of last sonar measurement (not filtered)
+	hrt_abstime sonar_valid_time = 0;	// time of last sonar measurement used for correction (filtered)
 
 	int n_flow = 0;
 	float gyro_offset_filtered[] = { 0.0f, 0.0f, 0.0f };
@@ -329,7 +332,7 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 	float yaw_comp[] = { 0.0f, 0.0f };
 
 	bool gps_valid = false;			// GPS is valid
-	bool lidar_valid = false;		// lidar is valid
+	bool sonar_valid = false;		// sonar is valid
 	bool flow_valid = false;		// flow is valid
 	bool flow_accurate = false;		// flow should be accurate (this flag not updated if flow_valid == false)
 	bool vision_valid = false;		// vision is valid
@@ -369,7 +372,7 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 	int vehicle_gps_position_sub = orb_subscribe(ORB_ID(vehicle_gps_position));
 	int vision_position_estimate_sub = orb_subscribe(ORB_ID(vision_position_estimate));
 	int att_pos_mocap_sub = orb_subscribe(ORB_ID(att_pos_mocap));
-	int distance_sensor_sub = orb_subscribe(ORB_ID(distance_sensor));
+//	int distance_sensor_sub = orb_subscribe(ORB_ID(distance_sensor));
 
 	/* advertise */
 	orb_advert_t vehicle_local_position_pub = orb_advertise(ORB_ID(vehicle_local_position), &local_pos);
@@ -455,7 +458,7 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 			attitude_updates++;
 
 			bool updated;
-			bool updated2;
+//			bool updated2;
 
 			/* parameter update */
 			orb_check(parameter_update_sub, &updated);
@@ -513,6 +516,7 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 				}
 
 				if (sensor.baro_timestamp[0] != baro_timestamp) {
+					baro_filtered += (sensor.baro_alt_meter[0] - baro_filtered) * params.w_z_baro; // TODO: this should actually be a filter cutoff 
 					corr_baro = baro_offset - sensor.baro_alt_meter[0] - z_est[0];
 					baro_timestamp = sensor.baro_timestamp[0];
 					baro_updates++;
@@ -521,63 +525,53 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 
 			/* optical flow */
 			orb_check(optical_flow_sub, &updated);
-			orb_check(distance_sensor_sub, &updated2);
 
-			/* update lidar separately, needed by terrain estimator */
-			if (updated2) {
-				orb_copy(ORB_ID(distance_sensor), distance_sensor_sub, &lidar);
-			}
-
-			if (updated && updated2) {
+			if (updated){
 				orb_copy(ORB_ID(optical_flow), optical_flow_sub, &flow);
 
 				/* calculate time from previous update */
 //				float flow_dt = flow_prev > 0 ? (flow.flow_timestamp - flow_prev) * 1e-6f : 0.1f;
 //				flow_prev = flow.flow_timestamp;
+// MODIFICA
+				/* if new reading is received */
+				if (fabsf(flow.ground_distance_m - sonar_prev) > FLT_EPSILON)
+				{ 
+					sonar_time = t;
+					sonar_prev = flow.ground_distance_m;
+					sonar_filtered += (flow.ground_distance_m - sonar_filtered) * params.lidar_filt;
 
-				if ((lidar.current_distance > 0.21f) &&
-					(lidar.current_distance < 4.0f) &&
-					/*(PX4_R(att.R, 2, 2) > 0.7f) &&*/
-					(fabsf(lidar.current_distance - lidar_prev) > FLT_EPSILON)) {
-
-					lidar_time = t;
-					lidar_prev = lidar.current_distance;
-					corr_lidar = lidar.current_distance + surface_offset + z_est[0];
-					corr_lidar_filtered += (corr_lidar - corr_lidar_filtered) * params.lidar_filt;
-
-					if (fabsf(corr_lidar) > params.lidar_err) {
-						/* correction is too large: spike or new ground level? */
-						if (fabsf(corr_lidar - corr_lidar_filtered) > params.lidar_err) {
-							/* spike detected, ignore */
-							corr_lidar = 0.0f;
-							lidar_valid = false;
-
-						} else {
-							/* new ground level */
-							surface_offset -= corr_lidar;
-							surface_offset_rate = 0.0f;
-							corr_lidar = 0.0f;
-							corr_lidar_filtered = 0.0f;
-							lidar_valid_time = t;
-							lidar_valid = true;
-							local_pos.surface_bottom_timestamp = t;
-							mavlink_log_info(mavlink_fd, "[inav] new surface level: %d", (int)surface_offset);
+					if (sonar_filtered > 0.31f && sonar_filtered < 3.9f) /* vehicle is assumed to be inside sonar range */
+					{
+						if (PX4_R(att.R, 2, 2) > 0.7f) /* if tilt is not to big, we can assumed sonar reading is usable */
+						{ 
+							sonar_valid = true;
+ 							if (fabsf(flow.ground_distance_m - sonar_filtered) > params.lidar_err || flow.ground_distance_m < 0.31f || 									flow.ground_distance_m > 3.9f) {
+								/* spike detected, ignore reading, do not apply any correction (this will eventually time out if not 									recovered) */
+								corr_sonar = 0;
+							} else {
+								/* correction is ok, use it and mark it as current */
+								sonar_valid_time = t;
+								sonar_corrected = flow.ground_distance_m * PX4_R(att.R, 2, 2); /* corrected by pitch-roll */
+								corr_sonar = sonar_corrected + z_est[0];
+							}
 						}
-
-					} else {
-						/* correction is ok, use it */
-						lidar_valid_time = t;
-						lidar_valid = true;
+						/* else, dont touch correction, which will be only be usable for some time */
+					}
+					else {
+						/* sonar is outside of usable range to trust it */
+						corr_sonar = 0.0f;
+						sonar_valid = false; 
+					
 					}
 				}
 
-				float flow_q = flow.quality / 255.0f;
-				float dist_bottom = - z_est[0] - surface_offset; //lidar.current_distance;
 
-				if (dist_bottom > 0.21f && flow_q > params.flow_q_min) {
+				float flow_q = flow.quality / 255.0f;
+
+				/* flow depends on z_est, which is assumed to be good due to sonar, so only compute within expected sonar range */
+				if (-z_est[0] > 0.35f && -z_est[0] < 3.5f && flow_q > params.flow_q_min && PX4_R(att.R, 2, 2) > 0.7f) { 
 					/* distance to surface */
-					//float flow_dist = dist_bottom / PX4_R(att.R, 2, 2); //use this if using sonar
-					float flow_dist = dist_bottom; //use this if using lidar
+					float flow_dist = -z_est[0] / PX4_R(att.R, 2, 2);
 
 					/* check if flow if too large for accurate measurements */
 					/* calculate estimated velocity in body frame */
@@ -770,7 +764,7 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 			/* vehicle GPS position */
 			orb_check(vehicle_gps_position_sub, &updated);
 
-			if (updated) {
+			if (0) {//if (updated) {
 				orb_copy(ORB_ID(vehicle_gps_position), vehicle_gps_position_sub, &gps);
 
 				bool reset_est = false;
@@ -875,12 +869,25 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 			}
 		}
 
-		/* check for timeout on FLOW topic */
+		/* check for timeout on FLOW topic 
 		if ((flow_valid || lidar_valid) && t > flow.timestamp + flow_topic_timeout) {
 			flow_valid = false;
 			lidar_valid = false;
 			warnx("FLOW timeout");
 			mavlink_log_info(mavlink_fd, "[inav] FLOW timeout");
+		}
+*/
+		/* MODIFICA check for timeout on FLOW topic */
+		if ((flow_valid || sonar_valid) && t > flow.timestamp + flow_topic_timeout) {
+			flow_valid = false;
+			sonar_valid = false;
+			warnx("FLOW timeout");
+			mavlink_log_info(mavlink_fd, "[inav] FLOW timeout");
+		}
+		/* check for sonar measurement timeout */
+		if (sonar_valid && (t > (sonar_time + sonar_timeout))) {
+			corr_sonar = 0.0f;
+			sonar_valid = false;
 		}
 
 		/* check for timeout on GPS topic */
@@ -904,12 +911,12 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 			mavlink_log_info(mavlink_fd, "[inav] MOCAP timeout");
 		}
 
-		/* check for lidar measurement timeout */
+		/* MODIFICA check for lidar measurement timeout 
 		if (lidar_valid && (t > (lidar_time + lidar_timeout))) {
 			corr_lidar = 0.0f;
 			lidar_valid = false;
 		}
-
+*/
 		float dt = t_prev > 0 ? (t - t_prev) / 1000000.0f : 0.0f;
 		dt = fmaxf(fminf(0.02, dt), 0.0002);		// constrain dt from 0.2 to 20 ms
 		t_prev = t;
@@ -945,18 +952,12 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 
 		bool can_estimate_xy = (eph < max_eph_epv) || use_gps_xy || use_flow || use_vision_xy || use_mocap;
 
-		bool dist_bottom_valid = (t < lidar_valid_time + lidar_valid_timeout);
 
-		if (dist_bottom_valid) {
-			/* surface distance prediction */
-			surface_offset += surface_offset_rate * dt;
+		bool use_sonar = sonar_valid && params.w_z_lidar > MIN_VALID_W && (t < sonar_valid_time + sonar_valid_timeout) &&
+										 sonar_corrected > 0.31f && sonar_corrected < 3.5f; /* sonar_valid is necessary but not sufficient condition, here we check that last estimate is not too old and current reading (which should not be a spike) is within range */
 
-			/* surface distance correction */
-			if (lidar_valid) {
-				surface_offset_rate -= corr_lidar * 0.5f * params.w_z_lidar * params.w_z_lidar * dt;
-				surface_offset -= corr_lidar * params.w_z_lidar * dt;
-			}
-		}
+
+		bool dist_bottom_valid = (t < sonar_valid_time + sonar_valid_timeout);
 
 		float w_xy_gps_p = params.w_xy_gps_p * w_gps_xy;
 		float w_xy_gps_v = params.w_xy_gps_v * w_gps_xy;
@@ -1060,7 +1061,10 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 			accel_bias_corr[1] -= corr_flow[1] * params.w_xy_flow;
 		}
 
-		accel_bias_corr[2] -= corr_baro * params.w_z_baro * params.w_z_baro;
+		if (use_sonar)
+			accel_bias_corr[2] -= -corr_sonar * params.w_z_lidar * params.w_z_lidar;
+		else
+			accel_bias_corr[2] -= corr_baro * params.w_z_baro * params.w_z_baro; 
 
 		/* transform error vector from NED frame to body frame */
 		for (int i = 0; i < 3; i++) {
@@ -1086,7 +1090,13 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 		}
 
 		/* inertial filter correction for altitude */
-		inertial_filter_correct(corr_baro, dt, z_est, 0, params.w_z_baro);
+		if (use_sonar) { /* when sonar is usable, prefer sonar */
+			inertial_filter_correct(-corr_sonar, dt, z_est, 0, params.w_z_lidar);
+			baro_offset = baro_filtered - sonar_corrected; /* update baro offset to follow sonar's estimate */
+		}
+		else {
+			inertial_filter_correct(corr_baro, dt, z_est, 0, params.w_z_baro);
+		} 
 
 		if (use_gps_z) {
 			epv = fminf(epv, gps.epv);
@@ -1192,7 +1202,8 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 			inertial_filter_correct(-y_est[1], dt, y_est, 1, params.w_xy_res_v);
 		}
 
-		/* run terrain estimator */
+		/* run terrain estimator MODIFICA */
+		lidar.current_distance=flow.ground_distance_m;
 		terrain_estimator->predict(dt, &att, &sensor, &lidar);
 		terrain_estimator->measurement_update(hrt_absolute_time(), &gps, &lidar, &att);
 
@@ -1257,8 +1268,8 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 			local_pos.epv = epv;
 
 			if (local_pos.dist_bottom_valid) {
-				local_pos.dist_bottom = -z_est[0] - surface_offset;
-				local_pos.dist_bottom_rate = - z_est[1] - surface_offset_rate;
+				local_pos.dist_bottom = sonar_corrected; /* this is only for log analysis */
+				local_pos.dist_bottom_rate = sonar_prev; /* idem */ 
 			}
 
 			local_pos.timestamp = t;
