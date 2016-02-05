@@ -151,6 +151,7 @@ set(config_module_list
 	# Tutorial code from
 	# https://px4.io/dev/daemon
 	#examples/px4_daemon_app
+	examples/dynamixel_daemon
 
 	# Tutorial code from
 	# https://px4.io/dev/debug_values

@@ -52,57 +52,56 @@ __EXPORT int px4_dynamixel_main(int argc, char *argv[]);
 
 int px4_dynamixel_main(int argc, char *argv[])
 {
-    /*   if (argc < 2) {
-            printf("Missing command \n");
-            return 1;
-        }
-
-    if (!strcmp(argv[1], "initialize")) {
-        int res;
-        res = dxl_initialize(1,1);
-        if (!res)
-            printf("Error in initialization Dynamixel!\n");
-        printf("Initialization result: %d \n",res);
-        return 0;
-    }
-
-    if (!strcmp(argv[1], "terminate")) {
-        dxl_terminate();
-        return 0;
-    }
-
-    if (!strcmp(argv[1], "readword")) {
-        int res;
-        res = dxl_read_word(1,36);
-        printf("Present position: %d \n", res);
-        return 0;
-    }
-
-    if (!strcmp(argv[1], "writeword")) {
-        dxl_write_word(1,30,450);
-        printf("Write position setpoint \n");
-        return 0;
-    }
-  printf("Wrong command \n");
-  */
-//
     int res;
     int c = 0;
 	printf("Test Dynamixel!\n");
 
-    res = dxl_initialize(1,200);
+    res = dxl_initialize(1,9);
     if (!res)
         printf("Error in initialization Dynamixel!\n");
     printf("Initialization result: %d \n",res);
 
-	while (c<1){
-	//dxl_write_word(1,32,10);
-	//dxl_write_word(1,30,450);
-	//dxl_write_word(1,32,100);
+    dxl_write_word(254,32,15);
+
+      int NUM_ACTUATOR = 5;
+      int i;
+      int id[5];
+      int GoalPos;
+
+        for( i=0; i<NUM_ACTUATOR; i++ )
+        {
+            id[i] = i+1;
+        }
+
+        dxl_set_txpacket_id(254);
+        dxl_set_txpacket_instruction(131); //INST_SYNC_WRITE
+        dxl_set_txpacket_parameter(0, 30); //P_GOAL_POSITION_L
+        dxl_set_txpacket_parameter(1, 2);
+        for( i=0; i<NUM_ACTUATOR; i++ )
+        {
+            dxl_set_txpacket_parameter(2+3*i, id[i]);
+            GoalPos = (int)(500);
+            dxl_set_txpacket_parameter(2+3*i+1, dxl_get_lowbyte(GoalPos));
+            dxl_set_txpacket_parameter(2+3*i+2, dxl_get_highbyte(GoalPos));
+        }
+        dxl_set_txpacket_length((2+1)*NUM_ACTUATOR+4);
+
+        dxl_txrx_packet();
+
+        printf("Fine SyncWrite \n");
+
+
+    while (c<1){
+
+        for (int k = 1; k < 6; ++k) {
+            int *state;
+            state = dxl_read_state(k);
+            //printf("%d: %5d, %5d, %5d", k,state[0], state[1], state[2]);
+            if (dxl_get_result() != 1)
+            printf( "CommStatus %d Pos: %d \n",dxl_get_result(),state[0] );
+        }
+    //printf("\n");
 	c++;
     }
-	res = dxl_read_word(1,36);
-	printf("Read present position: %d \n",res);
-//
 	return 0;
 }
