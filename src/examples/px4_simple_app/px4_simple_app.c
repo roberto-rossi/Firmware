@@ -70,7 +70,7 @@ int px4_simple_app_main(int argc, char *argv[])
        orb_advert_t csi_dot_pub = orb_advertise(ORB_ID(csi_dot), &csi_dot);
 
     for (int var = 0; var < 20; ++var) {
-        for (int i = 0; i < 10; ++i) {
+        for (int i = 0; i < 11; ++i) {
             csi.csi[i] = i+var;
             csi_dot.csi_dot[i] = i+var;
         }

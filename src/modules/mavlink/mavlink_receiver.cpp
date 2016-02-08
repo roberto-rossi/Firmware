@@ -670,14 +670,14 @@ void MavlinkReceiver::handle_message_B2_matrix(mavlink_message_t *msg)
     memcpy(f.B+50,matrix.value,sizeof(matrix.value));
     f.timestamp = hrt_absolute_time();
 
-    printf("B: \n");
-    for(int i = 0; i < 10; i++) {
-        for(int j = 0; j < 10; j++) {
-            printf("%f ", (double)f.B[(i*10)+j]);
-        }
-        printf("\n");
-    }
-    printf("\n");
+//    printf("B: \n");
+//    for(int i = 0; i < 10; i++) {
+//        for(int j = 0; j < 10; j++) {
+//            printf("%f ", (double)f.B[(i*10)+j]);
+//        }
+//        printf("\n");
+//    }
+//    printf("\n");
 
     if (_B2_pub == nullptr) {
         _B2_pub = orb_advertise(ORB_ID(B_matrix), &f);
@@ -696,13 +696,13 @@ void MavlinkReceiver::handle_message_Bb_tb_i_matrix(mavlink_message_t *msg)
     memcpy(f.Bb_tb_i,matrix.value,sizeof(matrix.value));
     f.timestamp = hrt_absolute_time();
 
-    for(int i = 0; i < 8; i++) {
-        for(int j = 0; j < 6; j++) {
-            printf("%f ", (double)matrix.value[(i*6)+j]);
-        }
-        printf("\n");
-    }
-    printf("\n");
+//    for(int i = 0; i < 8; i++) {
+//        for(int j = 0; j < 6; j++) {
+//            printf("%f ", (double)matrix.value[(i*6)+j]);
+//        }
+//        printf("\n");
+//    }
+//    printf("\n");
 
     if (_Bb_tb_i_pub == nullptr) {
         _Bb_tb_i_pub = orb_advertise(ORB_ID(Bb_tb_i_matrix), &f);
