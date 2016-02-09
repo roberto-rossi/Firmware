@@ -162,6 +162,7 @@ set(config_module_list
 	#examples/fixedwing_control
 
 	examples/px4_dynamixel
+	examples/dynamixel_daemon
 
 	# Hardware test
 	#examples/hwtest
