@@ -90,17 +90,26 @@ int px4_dynamixel_main(int argc, char *argv[])
 
         printf("Fine SyncWrite \n");
 
+    int SyncRead[15];
 
-    while (c<1){
+    while (c<1000){
 
         for (int k = 1; k < 6; ++k) {
             int *state;
             state = dxl_read_state(k);
-            //printf("%d: %5d, %5d, %5d", k,state[0], state[1], state[2]);
+            SyncRead[0+(k-1)*3]=state[0];
+            SyncRead[1+(k-1)*3]=state[1];
+            SyncRead[2+(k-1)*3]=state[2];
+            //printf("%d: %5d, %5d, %5d \n", k,state[0], state[1], state[2]);
             if (dxl_get_result() != 1)
             printf( "CommStatus %d Pos: %d \n",dxl_get_result(),state[0] );
         }
-    //printf("\n");
+
+        for (int k = 0; k < 15; ++k) {
+            printf("%d ",SyncRead[k]);
+        }
+        printf("\n");
+
 	c++;
     }
 	return 0;

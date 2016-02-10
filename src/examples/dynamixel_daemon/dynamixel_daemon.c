@@ -55,6 +55,7 @@
 #include <systemlib/err.h>
 
 #include "dynamixel.h"
+#include "dxl_hal.h"
 #include <uORB/uORB.h>
 #include <uORB/topics/csi.h>
 #include <uORB/topics/csi_dot.h>
@@ -161,6 +162,8 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     orb_advert_t csi_dot_pub_fd = orb_advertise(ORB_ID(csi_dot), &csi_dot);
     int csi_dot_sub_fd = orb_subscribe(ORB_ID(csi_dot));
 
+    int *state;
+
 	/* one could wait for multiple topics with this technique, just using one here */
 	px4_pollfd_struct_t fds[] = {
 	    { .fd = csi_r_sub_fd,   .events = POLLIN },
@@ -174,7 +177,7 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     printf("Initialization result: %d \n",res);
 
     //Set Moving Speed
-    dxl_write_word(254,32,15);
+    dxl_write_word(254,32,30);
 
     //SyncWrite Initialization
     int NUM_ACTUATOR = 5;
@@ -186,6 +189,7 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
         id[i] = i+1;
     }
 
+    sleep(3);
     //Main Loop
 	while (!thread_should_exit) {
 	    /* wait for sensor update of 1 file descriptor for 1000 ms */
@@ -196,7 +200,7 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
 	        struct csi_r_s raw;
 	        /* copy sensors raw data into local buffer */
 	        orb_copy(ORB_ID(csi_r), csi_r_sub_fd, &raw);
-	        printf("[Dynamixel] SyncWrite: %g %g %g %g %g \n", (double)raw.csi_r[6], (double)raw.csi_r[7], (double)raw.csi_r[8], (double)raw.csi_r[9], (double)raw.csi_r[10]);
+	        //printf("[Dynamixel] SyncWrite: %g %g %g %g %g \n", (double)raw.csi_r[6], (double)raw.csi_r[7], (double)raw.csi_r[8], (double)raw.csi_r[9], (double)raw.csi_r[10]);
 
 	        //Conversion from rad to bit
 	        GoalPos[0] = (int)(raw.csi_r[6]*195.5696f+512);
@@ -205,7 +209,7 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
 	        GoalPos[3] = (int)(raw.csi_r[9]*195.5696f+512);
 	        GoalPos[4] = (int)(raw.csi_r[10]*195.5696f+512);
 
-	        printf("[Dynamixel] GoalPos: %d %d %d %d %d \n", GoalPos[0], GoalPos[1], GoalPos[2], GoalPos[3], GoalPos[4]);
+	        //printf("[Dynamixel] GoalPos: %d %d %d %d %d \n", GoalPos[0], GoalPos[1], GoalPos[2], GoalPos[3], GoalPos[4]);
 
 	        //SyncWrite
 	        dxl_set_txpacket_id(254);
@@ -226,21 +230,22 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
 	    orb_copy(ORB_ID(csi), csi_sub_fd, &csi);
 	    orb_copy(ORB_ID(csi_dot), csi_dot_sub_fd, &csi_dot);
 
-//	    //Read cycle
-//        for (int k = 1; k < 6; ++k) {
-//            int *state;
-//            state = dxl_read_state(k);
-//            //printf("%d: %5d, %5d, %5d", k,state[0], state[1], state[2]);
-//            if (dxl_get_result() != 1)
-//                printf( "CommStatus %d \n",dxl_get_result());
-//            else {
-//                csi.csi[k+5]=(state[0]-512)/195.5696f;
-//                if (state[1]>1023)
-//                    state[1]=-state[1]-1024;
-//                csi_dot.csi_dot[k+5]=(float)state[1]*0.0119f;
-//            }
-//
-//        }
+	    //Read cycle
+        for (int k = 1; k < 6; ++k) {
+            state = dxl_read_state(k);
+            //printf("%d: %5d, %5d, %5d", k,state[0], state[1], state[2]);
+            if (dxl_get_result() != 1) {
+                printf( "CommStatus %d \n",dxl_get_result());
+                dxl_terminate();
+                res = dxl_initialize(1,9);
+                dxl_write_word(254,32,30);
+            } else {
+                csi.csi[k+5]=((float)state[0]-512)/195.5696f;
+                if (state[1]>1023)
+                    state[1]=-(float)(state[1]-1024);
+                csi_dot.csi_dot[k+5]=(float)state[1]*0.0119f;
+            }
+        }
 	    orb_publish(ORB_ID(csi), csi_pub_fd, &csi);
 	    orb_publish(ORB_ID(csi_dot), csi_dot_pub_fd, &csi_dot);
 	}

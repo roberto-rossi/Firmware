@@ -69,15 +69,17 @@ int px4_simple_app_main(int argc, char *argv[])
        memset(&csi_dot, 0, sizeof(csi_dot));
        orb_advert_t csi_dot_pub = orb_advertise(ORB_ID(csi_dot), &csi_dot);
 
-    for (int var = 0; var < 20; ++var) {
-        for (int i = 0; i < 10; ++i) {
-            csi.csi[i] = i+var;
-            csi_dot.csi_dot[i] = i+var;
+    for (int var = 0; var < 10; ++var) {
+        for (int var = 0; var < 20; ++var) {
+            for (int i = 0; i < 10; ++i) {
+                csi.csi[i] = i+var;
+                csi_dot.csi_dot[i] = i+var;
+            }
+            int err = orb_publish(ORB_ID(csi), csi_pub, &csi);
+            orb_publish(ORB_ID(csi_dot), csi_dot_pub, &csi_dot);
+            printf("%d \n",err);
+            usleep(10000);
         }
-        int err = orb_publish(ORB_ID(csi), csi_pub, &csi);
-        orb_publish(ORB_ID(csi_dot), csi_dot_pub, &csi_dot);
-        printf("%d \n",err);
-        sleep(1);
     }
 
 	PX4_INFO("exiting");

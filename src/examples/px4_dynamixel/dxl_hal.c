@@ -31,7 +31,7 @@ int dxl_hal_open( int devIndex, float baudrate )
     /* baud rate */
 	speed_t speed = baudrate;
 	gfByteTransTime = (double)(10000000.0f / baudrate); //Modificato da default
-    printf("baudrate: %.2g  gfByteTransTime: %.2g \n",(double)baudrate,gfByteTransTime);
+    //printf("baudrate: %.2g  gfByteTransTime: %.2g \n",(double)baudrate,gfByteTransTime);
 
 	dxl_hal_close();
 
@@ -96,26 +96,56 @@ void dxl_hal_clear(void)
 // Return: number of data transmitted. -1 is error.
 int dxl_hal_tx( unsigned char *pPacket, int numPacket )
 {
-	int numWritePacket = write(uart, pPacket, numPacket);
-	//printf("Tempo fine scrittura tx: %d \n",myclock());
-	uint8_t dummy[numPacket];
-	usleep((int)(gfByteTransTime*(double)numPacket+250)); //Tempo di attesa necessario perchè il buffer legga il msg inviato
-	read(uart, &dummy, numPacket);
 
+    tcflush(uart, TCIFLUSH);
+    int numWritePacket = write(uart, pPacket, numPacket);
+
+////    printf("Post Write %d \n",myclock());
+////	printf("Write: ", numWritePacket, numPacket);
+////  for (int var = 0; var < numPacket; ++var) {
+////      printf("%d ", pPacket[var]);
+////  }
+////	printf("\n");
+////	printf("Post Print %d \n",myclock());
+//
+//	uint8_t dummy[numPacket];
+//	//usleep((int)(gfByteTransTime*(double)(numPacket)+500)); //Tempo di attesa necessario perchè il buffer legga il msg inviato
+//
+//	usleep(20);
+//	int i=0;
+//	int err=0;
+////	long time = myclock() + (int)(gfByteTransTime*(double)(numPacket*2));
+////	while((i<numPacket) && (time>myclock())){
+////	printf("Read %d \n",myclock());
+////	printf("dummy: ");
+//	while(i<numPacket){
+//        read(uart,&dummy,1);
+//        //printf("%d ",dummy[0]);
+//        if (dummy[0] != pPacket[i]) {
+//            printf("pPacket: %d dummy: %d\n",pPacket[i],dummy[0]);
+//            err = 1;
+//            } else
+//                i++;
+//        }
+////	printf("\n");
+////	printf("EndRead %d \n",myclock());
+//	usleep(20);
+
+    uint8_t dummy[numPacket];
+    usleep(1500);
+    read(uart, &dummy, numPacket);
 	int var;
 	int err = 0;
-    for (var = 0; var < numPacket; ++var) {
+	for (var = 0; var < numPacket; ++var) {
         if (dummy[var] != pPacket[var]) {
-            printf("pPacket: %d dummy: %d\n",pPacket[var],dummy[var]);
             err = 1;
             break;
         }
     }
-    if (err)
-        printf("[DYNAMIXEL] Errore clean buffer lettura \n");
-//printf("usleep: %d \n",(int)(gfByteTransTime/2*numPacket*1000)); //Output del tempo di lettura
-
-	return numWritePacket;
+    if (err) {
+            printf("[DYNAMIXEL] Errore clean buffer lettura \n");
+    }
+	return numWritePacket-err;
 }
 
 // Recieving date
