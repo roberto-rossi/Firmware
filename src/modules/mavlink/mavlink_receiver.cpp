@@ -127,6 +127,17 @@ MavlinkReceiver::MavlinkReceiver(Mavlink *parent) :
 	_manual_pub(nullptr),
 	_land_detector_pub(nullptr),
 	_time_offset_pub(nullptr),
+    //MODIFICA per invio delle matrici
+    _B1_pub(nullptr),
+    _B2_pub(nullptr),
+    _Bb_tb_i_pub(nullptr),
+    _Bb_tb_i_pinv_pub(nullptr),
+    _T_bw_pub(nullptr),
+    _g_pub(nullptr),
+    _csi_r_pub(nullptr),
+    _csi_dot_r_pub(nullptr),
+    _B_sub(0),
+    //FINE MODIFICA
 	_control_mode_sub(orb_subscribe(ORB_ID(vehicle_control_mode))),
 	_hil_frames(0),
 	_old_timestamp(0),
@@ -227,7 +238,39 @@ MavlinkReceiver::handle_message(mavlink_message_t *msg)
 	case MAVLINK_MSG_ID_DISTANCE_SENSOR:
 		handle_message_distance_sensor(msg);
 		break;
+    //MODIFICA per invio delle matrici
+    case MAVLINK_MSG_ID_B1_MATRIX:
+            handle_message_B1_matrix(msg);
+            break;
 
+    case MAVLINK_MSG_ID_B2_MATRIX:
+            handle_message_B2_matrix(msg);
+            break;
+
+    case MAVLINK_MSG_ID_BB_TB_I_MATRIX:
+            handle_message_Bb_tb_i_matrix(msg);
+            break;
+
+    case MAVLINK_MSG_ID_BB_TB_I_PINV_MATRIX:
+            handle_message_Bb_tb_i_pinv_matrix(msg);
+            break;
+
+    case MAVLINK_MSG_ID_T_BW_MATRIX:
+            handle_message_T_bw_matrix(msg);
+            break;
+
+    case MAVLINK_MSG_ID_G_MATRIX:
+            handle_message_g_matrix(msg);
+            break;
+
+    case MAVLINK_MSG_ID_CSI_R_MATRIX:
+            handle_message_csi_r_matrix(msg);
+            break;
+
+    case MAVLINK_MSG_ID_CSI_DOT_R_MATRIX:
+            handle_message_csi_dot_r_matrix(msg);
+            break;
+    //FINE MODIFICA
 	default:
 		break;
 	}
@@ -599,7 +642,171 @@ MavlinkReceiver::handle_message_distance_sensor(mavlink_message_t *msg)
 		orb_publish(ORB_ID(distance_sensor), _distance_sensor_pub, &d);
 	}
 }
+//MODIFICA per invio delle matrici
+void MavlinkReceiver::handle_message_B1_matrix(mavlink_message_t *msg)
+{
+    mavlink_b1_matrix_t matrix;
+    mavlink_msg_b1_matrix_decode(msg, &matrix);
+    struct B_matrix_s f;
 
+    memset(&f, 0, sizeof(f));
+
+    if (_B1_pub == nullptr) {
+        _B_sub = orb_subscribe(ORB_ID(B_matrix));
+       }
+    orb_copy(ORB_ID(B_matrix), _B_sub, &f);
+
+    memcpy(f.B,matrix.value,sizeof(matrix.value));
+    f.timestamp = hrt_absolute_time();
+
+    if (_B1_pub == nullptr) {
+        _B1_pub = orb_advertise(ORB_ID(B_matrix), &f);
+    } else {
+        orb_publish(ORB_ID(B_matrix), _B1_pub, &f);
+    }
+}
+void MavlinkReceiver::handle_message_B2_matrix(mavlink_message_t *msg)
+{
+    mavlink_b2_matrix_t matrix;
+    mavlink_msg_b2_matrix_decode(msg, &matrix);
+    struct B_matrix_s f;
+
+    memset(&f, 0, sizeof(f));
+
+    if (_B1_pub == nullptr) {
+            _B_sub = orb_subscribe(ORB_ID(B_matrix));
+           }
+    orb_copy(ORB_ID(B_matrix), _B_sub, &f);
+
+    memcpy(f.B+50,matrix.value,sizeof(matrix.value));
+    f.timestamp = hrt_absolute_time();
+
+    printf("B: \n");
+    for(int i = 0; i < 10; i++) {
+        for(int j = 0; j < 10; j++) {
+            printf("%f ", (double)f.B[(i*10)+j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+
+    if (_B2_pub == nullptr) {
+        _B2_pub = orb_advertise(ORB_ID(B_matrix), &f);
+    } else {
+        orb_publish(ORB_ID(B_matrix), _B2_pub, &f);
+    }
+}
+void MavlinkReceiver::handle_message_Bb_tb_i_matrix(mavlink_message_t *msg)
+{
+    mavlink_bb_tb_i_matrix_t matrix;
+    mavlink_msg_bb_tb_i_matrix_decode(msg, &matrix);
+    struct Bb_tb_i_matrix_s f;
+
+    memset(&f, 0, sizeof(f));
+
+    memcpy(f.Bb_tb_i,matrix.value,sizeof(matrix.value));
+    f.timestamp = hrt_absolute_time();
+
+    for(int i = 0; i < 8; i++) {
+        for(int j = 0; j < 6; j++) {
+            printf("%f ", (double)matrix.value[(i*6)+j]);
+        }
+        printf("\n");
+    }
+    printf("\n");
+
+    if (_Bb_tb_i_pub == nullptr) {
+        _Bb_tb_i_pub = orb_advertise(ORB_ID(Bb_tb_i_matrix), &f);
+    } else {
+        orb_publish(ORB_ID(Bb_tb_i_matrix), _Bb_tb_i_pub, &f);
+    }
+}
+void MavlinkReceiver::handle_message_Bb_tb_i_pinv_matrix(mavlink_message_t *msg)
+{
+    mavlink_bb_tb_i_pinv_matrix_t matrix;
+    mavlink_msg_bb_tb_i_pinv_matrix_decode(msg, &matrix);
+    struct Bb_tb_i_pinv_matrix_s f;
+
+    memset(&f, 0, sizeof(f));
+
+    memcpy(f.Bb_tb_i_pinv,matrix.value,sizeof(matrix.value));
+    f.timestamp = hrt_absolute_time();
+
+    if (_Bb_tb_i_pinv_pub == nullptr) {
+        _Bb_tb_i_pinv_pub = orb_advertise(ORB_ID(Bb_tb_i_pinv_matrix), &f);
+    } else {
+        orb_publish(ORB_ID(Bb_tb_i_pinv_matrix), _Bb_tb_i_pinv_pub, &f);
+    }
+}
+void MavlinkReceiver::handle_message_T_bw_matrix(mavlink_message_t *msg)
+{
+    mavlink_t_bw_matrix_t matrix;
+    mavlink_msg_t_bw_matrix_decode(msg, &matrix);
+    struct T_bw_matrix_s f;
+
+    memset(&f, 0, sizeof(f));
+
+    memcpy(f.T_bw,matrix.value,sizeof(matrix.value));
+    f.timestamp = hrt_absolute_time();
+
+    if (_T_bw_pub == nullptr) {
+        _T_bw_pub = orb_advertise(ORB_ID(T_bw_matrix), &f);
+    } else {
+        orb_publish(ORB_ID(T_bw_matrix), _T_bw_pub, &f);
+    }
+}
+void MavlinkReceiver::handle_message_g_matrix(mavlink_message_t *msg)
+{
+    mavlink_g_matrix_t matrix;
+    mavlink_msg_g_matrix_decode(msg, &matrix);
+    struct g_matrix_s f;
+
+    memset(&f, 0, sizeof(f));
+
+    memcpy(f.g,matrix.value,sizeof(matrix.value));
+    f.timestamp = hrt_absolute_time();
+
+    if (_g_pub == nullptr) {
+        _g_pub = orb_advertise(ORB_ID(g_matrix), &f);
+    } else {
+        orb_publish(ORB_ID(g_matrix), _g_pub, &f);
+    }
+}
+void MavlinkReceiver::handle_message_csi_r_matrix(mavlink_message_t *msg)
+{
+    mavlink_csi_r_matrix_t matrix;
+    mavlink_msg_csi_r_matrix_decode(msg, &matrix);
+    struct csi_r_s f;
+
+    memset(&f, 0, sizeof(f));
+
+    memcpy(f.csi_r,matrix.value,sizeof(matrix.value));
+    f.timestamp = hrt_absolute_time();
+
+    if (_csi_r_pub == nullptr) {
+        _csi_r_pub = orb_advertise(ORB_ID(csi_r), &f);
+    } else {
+        orb_publish(ORB_ID(csi_r), _csi_r_pub, &f);
+    }
+}
+void MavlinkReceiver::handle_message_csi_dot_r_matrix(mavlink_message_t *msg)
+{
+    mavlink_csi_dot_r_matrix_t matrix;
+    mavlink_msg_csi_dot_r_matrix_decode(msg, &matrix);
+    struct csi_dot_r_s f;
+
+    memset(&f, 0, sizeof(f));
+
+    memcpy(f.csi_r_dot, matrix.value, sizeof(matrix.value));
+    f.timestamp = hrt_absolute_time();
+
+    if (_csi_dot_r_pub == nullptr) {
+        _csi_dot_r_pub = orb_advertise(ORB_ID(csi_dot_r), &f);
+    } else {
+        orb_publish(ORB_ID(csi_dot_r), _csi_dot_r_pub, &f);
+    }
+}
+//FINE MODIFICA
 void
 MavlinkReceiver::handle_message_att_pos_mocap(mavlink_message_t *msg)
 {

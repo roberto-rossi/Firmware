@@ -75,6 +75,11 @@
 #include <uORB/topics/camera_trigger.h>
 #include <uORB/topics/vehicle_land_detected.h>
 #include <uORB/topics/estimator_status.h>
+//MODIFICA per invio delle matrici
+#include <uORB/topics/csi.h>
+#include <uORB/topics/csi_dot.h>
+#include <uORB/topics/polimi_attitude_ned.h>
+//FINE MODIFICA
 #include <drivers/drv_rc_input.h>
 #include <drivers/drv_pwm_output.h>
 #include <systemlib/err.h>
@@ -2737,6 +2742,169 @@ protected:
 	}
 };
 
+//MODIFICA per invio delle matrici
+class MavlinkStreamCsi : public MavlinkStream
+{
+public:
+    const char *get_name() const
+    {
+        return MavlinkStreamCsi::get_name_static();
+    }
+
+    static const char *get_name_static()
+    {
+        return "CSI";
+    }
+
+    uint8_t get_id()
+    {
+        return MAVLINK_MSG_ID_CSI_MATRIX;
+    }
+
+    static MavlinkStream *new_instance(Mavlink *mavlink)
+    {
+        return new MavlinkStreamCsi(mavlink);
+    }
+
+   unsigned get_size()
+    {
+        return _csi_sub->is_published() ? (MAVLINK_MSG_ID_CSI_MATRIX_LEN + MAVLINK_NUM_NON_PAYLOAD_BYTES) : 0;    }
+
+private:
+    MavlinkOrbSubscription *_csi_sub;
+    uint64_t _csi_time;
+
+    /* do not allow top copying this class */
+    MavlinkStreamCsi(MavlinkStreamCsi &);
+    MavlinkStreamCsi& operator = (const MavlinkStreamCsi &);
+
+protected:
+    explicit MavlinkStreamCsi(Mavlink *mavlink) : MavlinkStream(mavlink),
+        _csi_sub(_mavlink->add_orb_subscription(ORB_ID(csi))),
+        _csi_time(0)
+    {}
+
+    void send(const hrt_abstime t)
+    {
+        struct csi_s csi;
+        if (_csi_sub->update(&_csi_time, &csi)) {
+            mavlink_csi_matrix_t msg;
+            msg.time_usec = t;
+            memcpy(msg.value, csi.csi, sizeof(msg.value));
+            _mavlink->send_message(MAVLINK_MSG_ID_CSI_MATRIX, &msg);
+        }
+    }
+};
+class MavlinkStreamCsiDot : public MavlinkStream
+{
+public:
+    const char *get_name() const
+    {
+        return MavlinkStreamCsiDot::get_name_static();
+    }
+
+    static const char *get_name_static()
+    {
+        return "CSI_DOT";
+    }
+
+    uint8_t get_id()
+    {
+        return MAVLINK_MSG_ID_CSI_DOT_MATRIX;
+    }
+
+    static MavlinkStream *new_instance(Mavlink *mavlink)
+    {
+        return new MavlinkStreamCsiDot(mavlink);
+    }
+
+   unsigned get_size()
+    {
+        return _csi_dot_sub->is_published() ? (MAVLINK_MSG_ID_CSI_DOT_MATRIX_LEN + MAVLINK_NUM_NON_PAYLOAD_BYTES) : 0;    }
+
+private:
+    MavlinkOrbSubscription *_csi_dot_sub;
+    uint64_t _csi_dot_time;
+
+    /* do not allow top copying this class */
+    MavlinkStreamCsiDot(MavlinkStreamCsiDot &);
+    MavlinkStreamCsiDot& operator = (const MavlinkStreamCsiDot &);
+
+protected:
+    explicit MavlinkStreamCsiDot(Mavlink *mavlink) : MavlinkStream(mavlink),
+        _csi_dot_sub(_mavlink->add_orb_subscription(ORB_ID(csi_dot))),
+        _csi_dot_time(0)
+    {}
+
+    void send(const hrt_abstime t)
+    {
+        struct csi_dot_s csi_dot;
+        if (_csi_dot_sub->update(&_csi_dot_time, &csi_dot)) {
+            mavlink_csi_dot_matrix_t msg;
+            msg.time_usec = t;
+            //msg.value = csi_dot.csi_dot;
+            memcpy(msg.value, csi_dot.csi_dot, sizeof(msg.value));
+            _mavlink->send_message(MAVLINK_MSG_ID_CSI_DOT_MATRIX, &msg);
+        }
+    }
+};
+class MavlinkStreamPolimiAttitudeNed : public MavlinkStream
+{
+public:
+    const char *get_name() const
+    {
+        return MavlinkStreamPolimiAttitudeNed::get_name_static();
+    }
+
+    static const char *get_name_static()
+    {
+        return "POLIMI_ATTITUDE_NED";
+    }
+
+    uint8_t get_id()
+    {
+        return MAVLINK_MSG_ID_POLIMI_ATTITUDE_NED;
+    }
+
+    static MavlinkStream *new_instance(Mavlink *mavlink)
+    {
+        return new MavlinkStreamCPolimiAttitudeNed(mavlink);
+    }
+
+   unsigned get_size()
+    {
+        return _polimi_attitude_ned_sub->is_published() ? (MAVLINK_MSG_ID_POLIMI_ATTITUDE_NED_LEN + MAVLINK_NUM_NON_PAYLOAD_BYTES) : 0;    }
+
+private:
+    MavlinkOrbSubscription *_polimi_attitude_ned_sub;
+    uint64_t _polimi_attitude_ned_time;
+
+    /* do not allow top copying this class */
+    MavlinkStreamPolimiAttitudeNed(MavlinkStreamPolimiAttitudeNed &);
+    MavlinkStreamPolimiAttitudeNed& operator = (const MavlinkStreamPolimiAttitudeNed &);
+
+protected:
+    explicit MavlinkStreamPolimiAttitudeNed(Mavlink *mavlink) : MavlinkStream(mavlink),
+        _polimi_attitude_ned_sub(_mavlink->add_orb_subscription(ORB_ID(polimi_attitude_ned))),
+        _polimi_attitude_ned_time(0)
+    {}
+
+    void send(const hrt_abstime t)
+    {
+        struct polimi_attitude_ned_s polimi_attitude_ned;
+        if (_polimi_attitude_ned_sub->update(&_polimi_attitude_ned_time, &polimi_attitude_ned)) {
+            mavlink_polimi_attitude_ned_matrix_t msg;
+            msg.time_usec = t;
+            msg.x = polimi_attitude_ned.x;
+            msg.y = polimi_attitude_ned.y;
+            msg.z = polimi_attitude_ned.z;
+            msg.w = polimi_attitude_ned.w;
+            _mavlink->send_message(MAVLINK_MSG_ID_POLIMI_ATTITUDE_NED, &msg);
+        }
+    }
+};
+//FINE MODIFICA
+
 const StreamListItem *streams_list[] = {
 	new StreamListItem(&MavlinkStreamHeartbeat::new_instance, &MavlinkStreamHeartbeat::get_name_static),
 	new StreamListItem(&MavlinkStreamStatustext::new_instance, &MavlinkStreamStatustext::get_name_static),
@@ -2776,5 +2944,10 @@ const StreamListItem *streams_list[] = {
 	new StreamListItem(&MavlinkStreamDistanceSensor::new_instance, &MavlinkStreamDistanceSensor::get_name_static),
 	new StreamListItem(&MavlinkStreamExtendedSysState::new_instance, &MavlinkStreamExtendedSysState::get_name_static),
 	new StreamListItem(&MavlinkStreamAltitude::new_instance, &MavlinkStreamAltitude::get_name_static),
-	nullptr
+    //MODIFICA per invio delle matrici
+    new StreamListItem(&MavlinkStreamCsi::new_instance, &MavlinkStreamCsi::get_name_static),
+    new StreamListItem(&MavlinkStreamCsiDot::new_instance, &MavlinkStreamCsiDot::get_name_static),
+    new StreamListItem(&MavlinkStreamPolimiAttitudeNed::new_instance, &MavlinkStreamPolimiAttitudeNed::get_name_static),
+    //FINE MODIFICA
+    nullptr
 };

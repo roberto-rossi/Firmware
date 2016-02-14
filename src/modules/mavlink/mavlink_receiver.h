@@ -75,6 +75,16 @@
 #include <uORB/topics/time_offset.h>
 #include <uORB/topics/distance_sensor.h>
 
+//MODIFICA per invio delle matrici
+#include <uORB/topics/B_matrix.h>
+#include <uORB/topics/Bb_tb_i_matrix.h>
+#include <uORB/topics/Bb_tb_i_pinv_matrix.h>
+#include <uORB/topics/T_bw_matrix.h>
+#include <uORB/topics/g_matrix.h>
+#include <uORB/topics/csi_r.h>
+#include <uORB/topics/csi_dot_r.h>
+//FINE MODIFICA
+
 #include "mavlink_ftp.h"
 
 #define PX4_EPOCH_SECS 1234567890ULL
@@ -137,6 +147,16 @@ private:
 	void handle_message_hil_gps(mavlink_message_t *msg);
 	void handle_message_hil_state_quaternion(mavlink_message_t *msg);
 	void handle_message_distance_sensor(mavlink_message_t *msg);
+    //MODIFICA per invio delle matrici
+    void handle_message_B1_matrix(mavlink_message_t *msg);
+    void handle_message_B2_matrix(mavlink_message_t *msg);
+    void handle_message_Bb_tb_i_matrix(mavlink_message_t *msg);
+    void handle_message_Bb_tb_i_pinv_matrix(mavlink_message_t *msg);
+    void handle_message_T_bw_matrix(mavlink_message_t *msg);
+    void handle_message_g_matrix(mavlink_message_t *msg);
+    void handle_message_csi_r_matrix(mavlink_message_t *msg);
+    void handle_message_csi_dot_r_matrix(mavlink_message_t *msg);
+    //FINE MODIFICA
 
 	void *receive_thread(void *arg);
 
@@ -197,6 +217,17 @@ private:
 	orb_advert_t _manual_pub;
 	orb_advert_t _land_detector_pub;
 	orb_advert_t _time_offset_pub;
+    //MODIFICA per invio delle matrici
+    orb_advert_t _B1_pub;
+    orb_advert_t _B2_pub;
+    orb_advert_t _Bb_tb_i_pub;
+    orb_advert_t _Bb_tb_i_pinv_pub;
+    orb_advert_t _T_bw_pub;
+    orb_advert_t _g_pub;
+    orb_advert_t _csi_r_pub;
+    orb_advert_t _csi_dot_r_pub;
+    int _B_sub;
+    //FINE MODIFICA
 	int _control_mode_sub;
 	int _hil_frames;
 	uint64_t _old_timestamp;
