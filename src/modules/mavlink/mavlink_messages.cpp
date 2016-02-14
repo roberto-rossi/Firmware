@@ -2868,7 +2868,7 @@ public:
 
     static MavlinkStream *new_instance(Mavlink *mavlink)
     {
-        return new MavlinkStreamCPolimiAttitudeNed(mavlink);
+        return new MavlinkStreamPolimiAttitudeNed(mavlink);
     }
 
    unsigned get_size()
@@ -2893,7 +2893,7 @@ protected:
     {
         struct polimi_attitude_ned_s polimi_attitude_ned;
         if (_polimi_attitude_ned_sub->update(&_polimi_attitude_ned_time, &polimi_attitude_ned)) {
-            mavlink_polimi_attitude_ned_matrix_t msg;
+            mavlink_polimi_attitude_ned_t msg;
             msg.time_usec = t;
             msg.x = polimi_attitude_ned.x;
             msg.y = polimi_attitude_ned.y;
