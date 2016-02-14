@@ -50,7 +50,6 @@ set(config_module_list
 	lib/conversion
 	lib/terrain_estimation
 	lib/runway_takeoff
-	lib/tailsitter_recovery
 	modules/controllib
 
 	#
