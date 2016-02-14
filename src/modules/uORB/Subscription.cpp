@@ -63,18 +63,6 @@
 #include "topics/att_pos_mocap.h"
 #include "topics/vision_position_estimate.h"
 
-//MODIFICA per invio delle matrici
-#include "topics/B_matrix.h"
-#include "topics/Bb_tb_i_matrix.h"
-#include "topics/Bb_tb_i_pinv_matrix.h"
-#include "topics/T_bw_matrix.h"
-#include "topics/g_matrix.h"
-#include "topics/csi_r.h"
-#include "topics/csi_dot_r.h"
-#include "topics/csi.h"
-#include "topics/csi_dot.h"
-//FINE MODIFICA
-
 #include <px4_defines.h>
 
 namespace uORB
@@ -176,17 +164,5 @@ template class __EXPORT Subscription<optical_flow_s>;
 template class __EXPORT Subscription<distance_sensor_s>;
 template class __EXPORT Subscription<att_pos_mocap_s>;
 template class __EXPORT Subscription<vision_position_estimate_s>;
-
-//MODIFICA per invio delle matrici
-template class __EXPORT Subscription<B_matrix_s>;
-template class __EXPORT Subscription<Bb_tb_i_matrix_s>;
-template class __EXPORT Subscription<Bb_tb_i_pinv_matrix_s>;
-template class __EXPORT Subscription<T_bw_matrix_s>;
-template class __EXPORT Subscription<g_matrix_s>;
-template class __EXPORT Subscription<csi_r_s>;
-template class __EXPORT Subscription<csi_dot_r_s>;
-template class __EXPORT Subscription<csi_s>;
-template class __EXPORT Subscription<csi_dot_s>;
-//FINE MODIFICA
 
 } // namespace uORB
