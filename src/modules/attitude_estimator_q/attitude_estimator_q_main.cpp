@@ -61,6 +61,7 @@
 #include <uORB/topics/att_pos_mocap.h>
 #include <uORB/topics/airspeed.h>
 #include <uORB/topics/parameter_update.h>
+#include <uORB/topics/polimi_attitude_ned.h>
 #include <drivers/drv_hrt.h>
 
 #include <mathlib/mathlib.h>
@@ -127,6 +128,7 @@ private:
 	int		_global_pos_sub = -1;
 	orb_advert_t	_att_pub = nullptr;
 	orb_advert_t	_ctrl_state_pub = nullptr;
+	orb_advert_t	_polimi_attitude_ned_pub = nullptr;
 
 	struct {
 		param_t	w_acc;
@@ -479,8 +481,18 @@ void AttitudeEstimatorQ::task_main()
 			orb_copy(ORB_ID(vision_position_estimate), _vision_sub, &_vision);
 			math::Quaternion q(_vision.q);
 
+//mavlink_log_info(_mavlink_fd, "[Giulio] q ingresso");
+//mavlink_log_info(_mavlink_fd, "[Giulio] q ingresso: %.3f %.3f %.3f %.3f",(double)q.data[0],(double)q.data[1],(double)q.data[2],(double)q.data[3]);
+
+
 			math::Matrix<3, 3> Rvis = q.to_dcm();
-			math::Vector<3> v(1.0f, 0.0f, 0.4f);
+//			math::Vector<3> v(1.0f, 0.0f, 0.4f);
+			math::Vector<3> v(1.0f, 0.0f, 0.0f);
+
+//			mavlink_log_info(_mavlink_fd, "[Giulio] MATRICE Rvis");
+//mavlink_log_info(_mavlink_fd, "[Giulio] Rvis_riga_1: %.3f %.3f %.3f",(double)Rvis.data[0][0],(double)Rvis.data[0][1],(double)Rvis.data[0][2]);
+//mavlink_log_info(_mavlink_fd, "[Giulio] Rvis_riga_2: %.3f %.3f %.3f",(double)Rvis.data[1][0],(double)Rvis.data[1][1],(double)Rvis.data[1][2]);
+//mavlink_log_info(_mavlink_fd, "[Giulio] Rvis_riga_3: %.3f %.3f %.3f",(double)Rvis.data[2][0],(double)Rvis.data[2][1],(double)Rvis.data[2][2]);
 
 			// Rvis is Rwr (robot respect to world) while v is respect to world.
 			// Hence Rvis must be transposed having (Rwr)' * Vw
@@ -601,6 +613,18 @@ void AttitudeEstimatorQ::task_main()
 		int att_inst;
 		orb_publish_auto(ORB_ID(vehicle_attitude), &_att_pub, &att, &att_inst, ORB_PRIO_HIGH);
 
+//MODIFICA: pubblico la q_att su polimi_attitude_ned
+		struct polimi_attitude_ned_s polimi_ned = {};
+		polimi_ned.w=_q.data[0];
+		polimi_ned.x=_q.data[1];
+		polimi_ned.y=_q.data[2];
+		polimi_ned.z=_q.data[3];
+
+		int polimi_ned_inst;
+		orb_publish_auto(ORB_ID(polimi_attitude_ned), &_polimi_attitude_ned_pub, &polimi_ned, &polimi_ned_inst, ORB_PRIO_HIGH);
+
+//mavlink_log_info(_mavlink_fd, "[Giulio] q polimi_ned: %.3f %.3f %.3f %.3f",(double)polimi_ned.w,(double)polimi_ned.x,(double)_q.data[2],(double)_q.data[3]);
+
 		struct control_state_s ctrl_state = {};
 
 		ctrl_state.timestamp = sensors.timestamp;
@@ -720,7 +744,7 @@ bool AttitudeEstimatorQ::update(float dt)
 	}
 
 	Quaternion q_last = _q;
-
+//mavlink_log_info(_mavlink_fd, "[Giulio] q attitude: %.3f %.3f %.3f %.3f",(double)_q.data[0],(double)_q.data[1],(double)_q.data[2],(double)_q.data[3]);
 	// Angular rate of correction
 	Vector<3> corr;
 
@@ -732,6 +756,7 @@ bool AttitudeEstimatorQ::update(float dt)
 			float vision_hdg_err = _wrap_pi(atan2f(vision_hdg_earth(1), vision_hdg_earth(0)));
 			// Project correction to body frame
 			corr += _q.conjugate_inversed(Vector<3>(0.0f, 0.0f, -vision_hdg_err)) * _w_ext_hdg;
+//mavlink_log_info(_mavlink_fd, "[Giulio] vision_corr: %.3f %.3f %.3f",(double)corr.data[0],(double)corr.data[1],(double)corr.data[2]);
 		}
 
 		if (_ext_hdg_mode == 2) {
