@@ -78,6 +78,9 @@
 #include "position_estimator_inav_params.h"
 #include "inertial_filter.h"
 
+//aggiunta
+//#include <px4_eigen.h>
+
 #define MIN_VALID_W 0.00001f
 #define PUB_INTERVAL 10000	// limit publish rate to 100 Hz
 #define EST_BUF_SIZE 250000 / PUB_INTERVAL		// buffer size is 0.5s
@@ -91,8 +94,8 @@ static const hrt_abstime vision_topic_timeout = 500000;	// Vision topic timeout 
 static const hrt_abstime mocap_topic_timeout = 500000;		// Mocap topic timeout = 0.5s
 static const hrt_abstime gps_topic_timeout = 500000;		// GPS topic timeout = 0.5s
 static const hrt_abstime flow_topic_timeout = 1000000;	// optical flow topic timeout = 1s
-static const hrt_abstime lidar_timeout = 150000;	// lidar timeout = 150ms
-static const hrt_abstime lidar_valid_timeout = 1000000;	// estimate lidar distance during this time after lidar loss
+static const hrt_abstime sonar_timeout = 1000000; //sonar timeout = 1s come optical flow; 150000;	// lidar timeout = 150ms
+static const hrt_abstime sonar_valid_timeout = 10000000;//aumentato di *10	// estimate lidar distance during this time after lidar loss
 static const unsigned updates_counter_len = 1000000;
 static const float max_flow = 1.0f;	// max flow value that can be used, rad/s
 
@@ -319,34 +322,47 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 	const int mocap_heading = 2;
 
 	float dist_ground = 0.0f;		//variables for lidar altitude estimation
-	float corr_lidar = 0.0f;
-	float lidar_offset = 0.0f;
-	int lidar_offset_count = 0;
-	bool lidar_first = true;
-	bool use_lidar = false;
-	bool use_lidar_prev = false;
+	float corr_sonar = 0.0f;
+	float sonar_offset = 0.0f;
+	int sonar_offset_count = 0;
+	bool sonar_first = true;
+	bool use_sonar = false;
+	bool use_sonar_prev = false;
 
 	float corr_flow[] = { 0.0f, 0.0f };	// N E
 	float w_flow = 0.0f;
 
-	hrt_abstime lidar_time = 0;			// time of last lidar measurement (not filtered)
-	hrt_abstime lidar_valid_time = 0;	// time of last lidar measurement used for correction (filtered)
+	hrt_abstime sonar_time = 0;			// time of last lidar measurement (not filtered)
+	hrt_abstime sonar_valid_time = 0;	// time of last lidar measurement used for correction (filtered)
 
 	int n_flow = 0;
 	float gyro_offset_filtered[] = { 0.0f, 0.0f, 0.0f };
 	float flow_gyrospeed[] = { 0.0f, 0.0f, 0.0f };
 	float flow_gyrospeed_filtered[] = { 0.0f, 0.0f, 0.0f };
 	float att_gyrospeed_filtered[] = { 0.0f, 0.0f, 0.0f };
-	float yaw_comp[] = { 0.0f, 0.0f };
+//	float yaw_comp[] = { 0.0f, 0.0f };
 	hrt_abstime flow_time = 0;
 	float flow_min_dist = 0.2f;
 
 	bool gps_valid = false;			// GPS is valid
-	bool lidar_valid = false;		// lidar is valid
+	bool sonar_valid = false;		// lidar is valid
 	bool flow_valid = false;		// flow is valid
 	bool flow_accurate = false;		// flow should be accurate (this flag not updated if flow_valid == false)
 	bool vision_valid = false;		// vision is valid
 	bool mocap_valid = false;		// mocap is valid
+
+//MODIFICA: variabili extra
+	float last_vision_x = 0.0f;
+	float last_vision_y = 0.0f;
+	float last_vision_z = 0.0f;
+	int spike_vision=0;
+	float max_vision_error=1.0; //metri di errore massimo
+	float flow_module_offset_z = 0.06f; //offset in z: 6cm in basso
+	float offset_p4flow[] = { 0.0f, 0.0f, 0.0f };
+	float px4flow_om[] = { 0.0f, 0.0f, 0.0f };
+	float vel_comp[] = { 0.0f, 0.0f, 0.0f };
+	float vel_comp_b[] = { 0.0f, 0.0f, 0.0f };
+    hrt_abstime last_vision_time = 0;
 
 	/* declare and safely initialize all structs */
 	struct actuator_controls_s actuator;
@@ -384,7 +400,7 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 	int vehicle_gps_position_sub = orb_subscribe(ORB_ID(vehicle_gps_position));
 	int vision_position_estimate_sub = orb_subscribe(ORB_ID(vision_position_estimate));
 	int att_pos_mocap_sub = orb_subscribe(ORB_ID(att_pos_mocap));
-	int distance_sensor_sub = orb_subscribe(ORB_ID(distance_sensor));
+//	int distance_sensor_sub = orb_subscribe(ORB_ID(distance_sensor));
 	int vehicle_rate_sp_sub = orb_subscribe(ORB_ID(vehicle_rates_setpoint));
 
 	/* advertise */
@@ -537,208 +553,265 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 			}
 
 
-			/* lidar alt estimation */
-			orb_check(distance_sensor_sub, &updated);
-
-			/* update lidar separately, needed by terrain estimator */
-			if (updated) {
-				orb_copy(ORB_ID(distance_sensor), distance_sensor_sub, &lidar);
-				lidar.current_distance += params.lidar_calibration_offset;
-			}
-			
-			if (updated) { //check if altitude estimation for lidar is enabled and new sensor data
-				
-				if (params.enable_lidar_alt_est && lidar.current_distance > lidar.min_distance && lidar.current_distance < lidar.max_distance
-			    		&& (PX4_R(att.R, 2, 2) > 0.7f)) {
-
-					if (!use_lidar_prev && use_lidar) {
-						lidar_first = true;
-					}
-
-					use_lidar_prev = use_lidar;
-
-					lidar_time = t;
-					dist_ground = lidar.current_distance * PX4_R(att.R, 2, 2); //vertical distance
-
-					if (lidar_first) {
-						lidar_first = false;
-						lidar_offset = dist_ground + z_est[0];
-						mavlink_log_info(mavlink_fd, "[inav] LIDAR: new ground offset");
-						warnx("[inav] LIDAR: new ground offset");
-					}
-
-					corr_lidar = lidar_offset - dist_ground - z_est[0];
-
-					if (fabsf(corr_lidar) > params.lidar_err) { //check for spike
-						corr_lidar = 0;
-						lidar_valid = false;
-						lidar_offset_count++;
-
-						if (lidar_offset_count > 3) { //if consecutive bigger/smaller measurements -> new ground offset -> reinit
-							lidar_first = true;
-							lidar_offset_count = 0;
-						}
-
-					} else {
-						corr_lidar = lidar_offset - dist_ground - z_est[0];
-						lidar_valid = true;
-						lidar_offset_count = 0;
-						lidar_valid_time = t;
-					}
-				} else {
-					lidar_valid = false;
-				}
-			}
-
-			/* optical flow */
+			/* optical flow e sonar*/
 			orb_check(optical_flow_sub, &updated);
 
-			if (updated && lidar_valid) {
+			if (updated) {
 				orb_copy(ORB_ID(optical_flow), optical_flow_sub, &flow);
 
-				flow_time = t;
-				float flow_q = flow.quality / 255.0f;
-				float dist_bottom = lidar.current_distance;
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: Nuovo dato");
 
-				if (dist_bottom > flow_min_dist && flow_q > params.flow_q_min && PX4_R(att.R, 2, 2) > 0.7f) {
-					/* distance to surface */
-					//float flow_dist = dist_bottom / PX4_R(att.R, 2, 2); //use this if using sonar
-					float flow_dist = dist_bottom; //use this if using lidar
+			/* sonar alt estimation */
+//inserisco la parte del sonar al posto del lidar
+				//if ( usa_lidar_per_altezza && dato>min && dato<max && non siamo troppo inclinati )
+//				if (params.enable_lidar_alt_est && flow.ground_distance_m > 0.31f && flow.ground_distance_m < 3.9f
+//			    		&& (PX4_R(att.R, 2, 2) > 0.7f)) {
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: nel range: dist orig: %.3f",(double)flow.ground_distance_m);
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: PX4_R(att, 2,2): %.3f",(double)PX4_R(att.R, 2, 2));
 
-					/* check if flow if too large for accurate measurements */
-					/* calculate estimated velocity in body frame */
-					float body_v_est[2] = { 0.0f, 0.0f };
+//MODIFICA: tolta la dipendenza dal parametro params.enable_lidar_alt_est che non è disponibile in qgroundcontrol
+				if (flow.ground_distance_m > 0.31f && flow.ground_distance_m < 3.9f
+			    		&& (PX4_R(att.R, 2, 2) > 0.7f)) {
 
-					for (int i = 0; i < 2; i++) {
-						body_v_est[i] = PX4_R(att.R, 0, i) * x_est[1] + PX4_R(att.R, 1, i) * y_est[1] + PX4_R(att.R, 2, i) * z_est[1];
+					//aggiungo il valore dell'offset in z del sonar
+//MODIFICA: tolta la dipendenza dal parametro params.lidar_calibration_offset che non è disponibile in qgroundcontrol
+					flow.ground_distance_m +=flow_module_offset_z;// params.lidar_calibration_offset;
+
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: nel range: dist corretta: %.1f",(double)flow.ground_distance_m);
+//MODIFICA
+					if (!use_sonar_prev && use_sonar) {
+						sonar_first = true;
 					}
 
-					/* set this flag if flow should be accurate according to current velocity and attitude rate estimate */
-					flow_accurate = fabsf(body_v_est[1] / flow_dist - att.rollspeed) < max_flow &&
-							fabsf(body_v_est[0] / flow_dist + att.pitchspeed) < max_flow;
+					use_sonar_prev = use_sonar;
 
-					/*calculate offset of flow-gyro using already calibrated gyro from autopilot*/
-					flow_gyrospeed[0] = flow.gyro_x_rate_integral / (float)flow.integration_timespan * 1000000.0f;
-					flow_gyrospeed[1] = flow.gyro_y_rate_integral / (float)flow.integration_timespan * 1000000.0f;
-					flow_gyrospeed[2] = flow.gyro_z_rate_integral / (float)flow.integration_timespan * 1000000.0f;
+					sonar_time = t;
 
-					//moving average
-					if (n_flow >= 100) {
-						gyro_offset_filtered[0] = flow_gyrospeed_filtered[0] - att_gyrospeed_filtered[0];
-						gyro_offset_filtered[1] = flow_gyrospeed_filtered[1] - att_gyrospeed_filtered[1];
-						gyro_offset_filtered[2] = flow_gyrospeed_filtered[2] - att_gyrospeed_filtered[2];
-						n_flow = 0;
-						flow_gyrospeed_filtered[0] = 0.0f;
-						flow_gyrospeed_filtered[1] = 0.0f;
-						flow_gyrospeed_filtered[2] = 0.0f;
-						att_gyrospeed_filtered[0] = 0.0f;
-						att_gyrospeed_filtered[1] = 0.0f;
-						att_gyrospeed_filtered[2] = 0.0f;
+					float sonar_pitch_correction = att.pitch;//eulerFromQuat(eigenqFromPx4q(_q));
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: att.pitch: %.4f",(double)att.pitch);				
+//MODIFICA: nel pitch c'è da compensare il braccio -> +params.flow_module_offset_y*sin(angolo_pitch)
 
-					} else {
-						flow_gyrospeed_filtered[0] = (flow_gyrospeed[0] + n_flow * flow_gyrospeed_filtered[0]) / (n_flow + 1);
-						flow_gyrospeed_filtered[1] = (flow_gyrospeed[1] + n_flow * flow_gyrospeed_filtered[1]) / (n_flow + 1);
-						flow_gyrospeed_filtered[2] = (flow_gyrospeed[2] + n_flow * flow_gyrospeed_filtered[2]) / (n_flow + 1);
-						att_gyrospeed_filtered[0] = (att.pitchspeed + n_flow * att_gyrospeed_filtered[0]) / (n_flow + 1);
-						att_gyrospeed_filtered[1] = (att.rollspeed + n_flow * att_gyrospeed_filtered[1]) / (n_flow + 1);
-						att_gyrospeed_filtered[2] = (att.yawspeed + n_flow * att_gyrospeed_filtered[2]) / (n_flow + 1);
-						n_flow++;
+					 //vertical distance
+					dist_ground = flow.ground_distance_m * PX4_R(att.R, 2, 2) + params.flow_module_offset_y*sonar_pitch_correction;
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: dist corretta: %.4f",(double)dist_ground);				
+
+					if (sonar_first) {
+						sonar_first = false;
+						sonar_offset = dist_ground + z_est[0];
+						mavlink_log_info(mavlink_fd, "[inav] SONAR: new ground offset");
+						warnx("[inav] SONAR: new ground offset");
+						//aggiunta
+						z_est[0]=-dist_ground;
 					}
 
+//AGGIUNTO
+//sonar_offset=0.0f;
 
-					/*yaw compensation (flow sensor is not in center of rotation) -> params in QGC*/
-					yaw_comp[0] = - params.flow_module_offset_y * (flow_gyrospeed[2] - gyro_offset_filtered[2]);
-					yaw_comp[1] = params.flow_module_offset_x * (flow_gyrospeed[2] - gyro_offset_filtered[2]);
+					corr_sonar = sonar_offset - dist_ground - z_est[0];
+//modifica
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: fabsf: %.4f",(double)fabsf(corr_sonar));
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: params.lidar_err: %.4f",(double)params.lidar_err);//0.5
+					if (fabsf(corr_sonar) > params.lidar_err) { //check for spike
+						corr_sonar = 0;
+						sonar_valid = false;
+						sonar_offset_count++;
 
-					/* convert raw flow to angular flow (rad/s) */
-					float flow_ang[2];
+/*modificare: serve qualcosa per impedire che vada alla deriva,
+qualcosa tipo se il modulo di z > 10m lo assegnamo a sonar (può succedere solo se abbiamo perso il marker)*/
 
-					/* check for vehicle rates setpoint - it below threshold -> dont subtract -> better hover */
-					orb_check(vehicle_rate_sp_sub, &updated);
-					if (updated)
-						orb_copy(ORB_ID(vehicle_rates_setpoint), vehicle_rate_sp_sub, &rates_setpoint);
-
-					double rate_threshold = 0.15f;
-
-					if (fabs(rates_setpoint.pitch) < rate_threshold) {
-						//warnx("[inav] test ohne comp");
-						flow_ang[0] = (flow.pixel_flow_x_integral / (float)flow.integration_timespan * 1000000.0f) * params.flow_k;//for now the flow has to be scaled (to small)
-					}
-					else {
-						//warnx("[inav] test mit comp");
-						//calculate flow [rad/s] and compensate for rotations (and offset of flow-gyro)
-						flow_ang[0] = ((flow.pixel_flow_x_integral - flow.gyro_x_rate_integral) / (float)flow.integration_timespan * 1000000.0f
-							       + gyro_offset_filtered[0]) * params.flow_k;//for now the flow has to be scaled (to small)
-					}
-
-					if (fabs(rates_setpoint.roll) < rate_threshold) {
-						flow_ang[1] = (flow.pixel_flow_y_integral / (float)flow.integration_timespan * 1000000.0f) * params.flow_k;//for now the flow has to be scaled (to small)
-					}
-					else {
-						//calculate flow [rad/s] and compensate for rotations (and offset of flow-gyro)
-						flow_ang[1] = ((flow.pixel_flow_y_integral - flow.gyro_y_rate_integral) / (float)flow.integration_timespan * 1000000.0f
-							       + gyro_offset_filtered[1]) * params.flow_k;//for now the flow has to be scaled (to small)
-					}
-
-					/* flow measurements vector */
-					float flow_m[3];
-					if (fabs(rates_setpoint.yaw) < rate_threshold) {
-						flow_m[0] = -flow_ang[0] * flow_dist;
-						flow_m[1] = -flow_ang[1] * flow_dist;
-					} else {
-						flow_m[0] = -flow_ang[0] * flow_dist - yaw_comp[0] * params.flow_k;
-						flow_m[1] = -flow_ang[1] * flow_dist - yaw_comp[1] * params.flow_k;
-					}
-					flow_m[2] = z_est[1];
-
-					/* velocity in NED */
-					float flow_v[2] = { 0.0f, 0.0f };
-
-					/* project measurements vector to NED basis, skip Z component */
-					for (int i = 0; i < 2; i++) {
-						for (int j = 0; j < 3; j++) {
-							flow_v[i] += PX4_R(att.R, i, j) * flow_m[j];
+						if (sonar_offset_count > 3) { //if consecutive bigger/smaller measurements -> new ground offset -> reinit
+							sonar_first = true;
+							sonar_offset_count = 0;
 						}
+
+					} else {
+						corr_sonar = sonar_offset - dist_ground - z_est[0];
+						sonar_valid = true;
+						sonar_offset_count = 0;
+						sonar_valid_time = t;
+//aggiunto
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: corr_sonar: %.3f", (double)corr_sonar);
 					}
-
-					/* velocity correction */
-					corr_flow[0] = flow_v[0] - x_est[1];
-					corr_flow[1] = flow_v[1] - y_est[1];
-					/* adjust correction weight */
-					float flow_q_weight = (flow_q - params.flow_q_min) / (1.0f - params.flow_q_min);
-					w_flow = PX4_R(att.R, 2, 2) * flow_q_weight / fmaxf(1.0f, flow_dist);
-
-
-					/* if flow is not accurate, reduce weight for it */
-					// TODO make this more fuzzy
-					if (!flow_accurate) {
-						w_flow *= 0.05f;
-					}
-
-					/* under ideal conditions, on 1m distance assume EPH = 10cm */
-					eph_flow = 0.1f / w_flow;
-
-					flow_valid = true;
-
 				} else {
-					w_flow = 0.0f;
-					flow_valid = false;
+					sonar_valid = false;
 				}
 
-				flow_updates++;
+//fine aggiunta
+
+			/* optical flow */
+//inizio modifica per usare come altezza il sonar, aggiungo la condizione if sonar_valid fa la parte del flow, altrimenti no
+				if(sonar_valid){
+					flow_time = t;
+					float flow_q = flow.quality / 255.0f;
+					float dist_bottom = flow.ground_distance_m;
+
+					if (dist_bottom > flow_min_dist && flow_q > params.flow_q_min && PX4_R(att.R, 2, 2) > 0.7f) {
+						/* distance to surface -> non uso dist_ground perche' e' corretta con l'offset */
+						float flow_dist = dist_bottom / PX4_R(att.R, 2, 2); //use this if using sonar
+						//float flow_dist = dist_bottom; //use this if using lidar
+
+						/* check if flow if too large for accurate measurements */
+						/* calculate estimated velocity in body frame */
+						float body_v_est[2] = { 0.0f, 0.0f };
+
+						for (int i = 0; i < 2; i++) {
+							body_v_est[i] = PX4_R(att.R, 0, i) * x_est[1] + PX4_R(att.R, 1, i) * y_est[1] + PX4_R(att.R, 2, i) * z_est[1];
+						}
+
+						/* set this flag if flow should be accurate according to current velocity and attitude rate estimate */
+						flow_accurate = fabsf(body_v_est[1] / flow_dist - att.rollspeed) < max_flow &&
+								fabsf(body_v_est[0] / flow_dist + att.pitchspeed) < max_flow;
+
+						/*calculate offset of flow-gyro using already calibrated gyro from autopilot*/
+						flow_gyrospeed[0] = flow.gyro_x_rate_integral / (float)flow.integration_timespan * 1000000.0f;
+						flow_gyrospeed[1] = flow.gyro_y_rate_integral / (float)flow.integration_timespan * 1000000.0f;
+						flow_gyrospeed[2] = flow.gyro_z_rate_integral / (float)flow.integration_timespan * 1000000.0f;
+
+						//moving average
+						if (n_flow >= 100) {
+							gyro_offset_filtered[0] = flow_gyrospeed_filtered[0] - att_gyrospeed_filtered[0];
+							gyro_offset_filtered[1] = flow_gyrospeed_filtered[1] - att_gyrospeed_filtered[1];
+							gyro_offset_filtered[2] = flow_gyrospeed_filtered[2] - att_gyrospeed_filtered[2];
+							n_flow = 0;
+							flow_gyrospeed_filtered[0] = 0.0f;
+							flow_gyrospeed_filtered[1] = 0.0f;
+							flow_gyrospeed_filtered[2] = 0.0f;
+							att_gyrospeed_filtered[0] = 0.0f;
+							att_gyrospeed_filtered[1] = 0.0f;
+							att_gyrospeed_filtered[2] = 0.0f;
+
+						} else {
+							flow_gyrospeed_filtered[0] = (flow_gyrospeed[0] + n_flow * flow_gyrospeed_filtered[0]) / (n_flow + 1);
+							flow_gyrospeed_filtered[1] = (flow_gyrospeed[1] + n_flow * flow_gyrospeed_filtered[1]) / (n_flow + 1);
+							flow_gyrospeed_filtered[2] = (flow_gyrospeed[2] + n_flow * flow_gyrospeed_filtered[2]) / (n_flow + 1);
+//							att_gyrospeed_filtered[0] = (att.pitchspeed + n_flow * att_gyrospeed_filtered[0]) / (n_flow + 1);
+//x_flow a sinistra e y_quad a destra, messo il -
+							att_gyrospeed_filtered[0] = (-att.pitchspeed + n_flow * att_gyrospeed_filtered[0]) / (n_flow + 1);
+							att_gyrospeed_filtered[1] = (att.rollspeed + n_flow * att_gyrospeed_filtered[1]) / (n_flow + 1);
+							att_gyrospeed_filtered[2] = (att.yawspeed + n_flow * att_gyrospeed_filtered[2]) / (n_flow + 1);
+							n_flow++;
+						}
+
+//MODIFICA
+						/*yaw compensation (flow sensor is not in center of rotation) -> params in QGC*/
+						//yaw_comp[0] = - params.flow_module_offset_y * (flow_gyrospeed[2] - gyro_offset_filtered[2]);
+						//yaw_comp[1] = params.flow_module_offset_x * (flow_gyrospeed[2] - gyro_offset_filtered[2]);
+
+					offset_p4flow[0] = params.flow_module_offset_x;
+					offset_p4flow[1] = params.flow_module_offset_y;
+					offset_p4flow[2] = 0.04f;//flow_module_offset_z;
+
+					px4flow_om[0] = flow_gyrospeed[0] - gyro_offset_filtered[0];
+					px4flow_om[1] = flow_gyrospeed[1] - gyro_offset_filtered[1];
+					px4flow_om[2] = flow_gyrospeed[2] - gyro_offset_filtered[2];
+					// performing the product om*(-r). Both in px4flow frame. 
+					// vel_comp is the velocity of the px4flow due to roll,pitch and yaw rates. 
+					vel_comp[0]	=	-(px4flow_om[1]*offset_p4flow[2] - px4flow_om[2]*offset_p4flow[1]);
+					vel_comp[1]	=	-(px4flow_om[2]*offset_p4flow[0] - px4flow_om[0]*offset_p4flow[2]);
+					//vel_comp[2]	=	-(px4flow_om[0]*offset_p4flow[1] - px4flow_om[1]*offset_p4flow[0]); USELESS
+					
+					/* From p4flow ref to NED ref */
+					vel_comp_b[0] = vel_comp[1];
+					vel_comp_b[1] = -vel_comp[0];
+//FINE MODIFICA
+
+						/* convert raw flow to angular flow (rad/s) */
+						float flow_ang[2];
+
+						/* check for vehicle rates setpoint - it below threshold -> dont subtract -> better hover */
+						orb_check(vehicle_rate_sp_sub, &updated);
+						if (updated)
+							orb_copy(ORB_ID(vehicle_rates_setpoint), vehicle_rate_sp_sub, &rates_setpoint);
+
+						double rate_threshold = 0.15f;
+
+						if (fabs(rates_setpoint.pitch) < rate_threshold) {
+							//warnx("[inav] test ohne comp");
+							flow_ang[0] = (flow.pixel_flow_x_integral / (float)flow.integration_timespan * 1000000.0f) * params.flow_k;//for now the flow has to be scaled (to small)
+						}
+						else {
+							//warnx("[inav] test mit comp");
+							//calculate flow [rad/s] and compensate for rotations (and offset of flow-gyro)
+							flow_ang[0] = ((flow.pixel_flow_x_integral - flow.gyro_x_rate_integral) / (float)flow.integration_timespan * 1000000.0f
+									   + gyro_offset_filtered[0]) * params.flow_k;//for now the flow has to be scaled (to small)
+						}
+
+						if (fabs(rates_setpoint.roll) < rate_threshold) {
+							flow_ang[1] = (flow.pixel_flow_y_integral / (float)flow.integration_timespan * 1000000.0f) * params.flow_k;//for now the flow has to be scaled (to small)
+						}
+						else {
+							//calculate flow [rad/s] and compensate for rotations (and offset of flow-gyro)
+							flow_ang[1] = ((flow.pixel_flow_y_integral - flow.gyro_y_rate_integral) / (float)flow.integration_timespan * 1000000.0f
+									   + gyro_offset_filtered[1]) * params.flow_k;//for now the flow has to be scaled (to small)
+						}
+
+						/* flow measurements vector */
+						float flow_m[3];
+						if (fabs(rates_setpoint.yaw) < rate_threshold) {
+							flow_m[0] = -flow_ang[0] * flow_dist;
+							flow_m[1] = -flow_ang[1] * flow_dist;
+						} else {
+//viene scalato??
+//							flow_m[0] = -flow_ang[0] * flow_dist - yaw_comp[0] * params.flow_k;
+//							flow_m[1] = -flow_ang[1] * flow_dist - yaw_comp[1] * params.flow_k;
+							flow_m[0] = -flow_ang[0] * flow_dist - vel_comp_b[0] * params.flow_k;
+							flow_m[1] = -flow_ang[1] * flow_dist - vel_comp_b[1] * params.flow_k;
+						}
+						flow_m[2] = z_est[1];
+
+						/* velocity in NED */
+						float flow_v[2] = { 0.0f, 0.0f };
+
+						/* project measurements vector to NED basis, skip Z component */
+						for (int i = 0; i < 2; i++) {
+							for (int j = 0; j < 3; j++) {
+								flow_v[i] += PX4_R(att.R, i, j) * flow_m[j];
+							}
+						}
+
+						/* velocity correction */
+						corr_flow[0] = flow_v[0] - x_est[1];
+						corr_flow[1] = flow_v[1] - y_est[1];
+						/* adjust correction weight */
+						float flow_q_weight = (flow_q - params.flow_q_min) / (1.0f - params.flow_q_min);
+						w_flow = PX4_R(att.R, 2, 2) * flow_q_weight / fmaxf(1.0f, flow_dist);
+
+
+						/* if flow is not accurate, reduce weight for it */
+						// TODO make this more fuzzy
+						if (!flow_accurate) {
+							w_flow *= 0.05f;
+						}
+
+						/* under ideal conditions, on 1m distance assume EPH = 10cm */
+						eph_flow = 0.1f / w_flow;
+
+						flow_valid = true;
+
+					} else {
+						w_flow = 0.0f;
+						flow_valid = false;
+					}
+
+					flow_updates++;
+				}
 			}
 
+
+//VISIONE
 			/* check no vision circuit breaker is set */
 			if (params.no_vision != CBRK_NO_VISION_KEY) {
 				/* vehicle vision position */
 				orb_check(vision_position_estimate_sub, &updated);
-
+//mavlink_log_info(mavlink_fd, "[Giulio] vision check");
 				if (updated) {
 					orb_copy(ORB_ID(vision_position_estimate), vision_position_estimate_sub, &vision);
-
-					static float last_vision_x = 0.0f;
-					static float last_vision_y = 0.0f;
-					static float last_vision_z = 0.0f;
+//mavlink_log_info(mavlink_fd, "[Giulio] vision: Nuovo dato");
+//MODIFICA: non ha senso mettere questo a zero ogni volta, su cosa calcola la velocita????
+//sposto l'inizializzazione in alto.
+//					static float last_vision_x = 0.0f;
+//					static float last_vision_y = 0.0f;
+//					static float last_vision_z = 0.0f;
 
 					/* reset position estimate on first vision update */
 					if (!vision_valid) {
@@ -763,37 +836,61 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 						mavlink_log_info(mavlink_fd, "[inav] VISION estimate valid");
 					}
 
-					/* calculate correction for position */
-					corr_vision[0][0] = vision.x - x_est[0];
-					corr_vision[1][0] = vision.y - y_est[0];
-					corr_vision[2][0] = vision.z - z_est[0];
-
-					static hrt_abstime last_vision_time = 0;
-
-					float vision_dt = (vision.timestamp_boot - last_vision_time) / 1e6f;
-					last_vision_time = vision.timestamp_boot;
-
-					if (vision_dt > 0.000001f && vision_dt < 0.2f) {
-						vision.vx = (vision.x - last_vision_x) / vision_dt;
-						vision.vy = (vision.y - last_vision_y) / vision_dt;
-						vision.vz = (vision.z - last_vision_z) / vision_dt;
-
+/*MODIFICA: controllo che il valore di visione non troppo diverso dal precedente, controllo il modulo della differenza
+in caso di presunto spike NON AGGIORNO il valore della last_vision, che contiene l'ultimo valore ritenuto attendibile
+in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non lo e' e il valore effettivamente era giusto e molto diverso dai precedenti metto un contatore, dopo 3 valori troppo lontani resetto tutto
+*/
+					if(spike_vision > 3 ){
 						last_vision_x = vision.x;
 						last_vision_y = vision.y;
-						last_vision_z = vision.z;
-
-						/* calculate correction for velocity */
-						corr_vision[0][1] = vision.vx - x_est[1];
-						corr_vision[1][1] = vision.vy - y_est[1];
-						corr_vision[2][1] = vision.vz - z_est[1];
-
-					} else {
+						last_vision_z = vision.z;						
+					}
+					if(fabsf(last_vision_x - vision.x)>max_vision_error || fabsf(last_vision_y - vision.y)>max_vision_error ||
+						fabsf(last_vision_z - vision.z)>max_vision_error) {
+						corr_vision[0][0]=0.0;
+						corr_vision[1][0]=0.0;
+						corr_vision[2][0]=0.0;
 						/* assume zero motion */
 						corr_vision[0][1] = 0.0f - x_est[1];
 						corr_vision[1][1] = 0.0f - y_est[1];
 						corr_vision[2][1] = 0.0f - z_est[1];
+						//aumento il contatore
+						spike_vision++;
 					}
+					else{
+						//resetto il contatore se i valori sono accettabili
+						spike_vision=0;
+						/* calculate correction for position */
+						corr_vision[0][0] = vision.x - x_est[0];
+						corr_vision[1][0] = vision.y - y_est[0];
+						corr_vision[2][0] = vision.z - z_est[0];
+//anche qua dichiara la variabile ogni ciclo mettendola a zero????? sposto su la dichiarazione
+//						static hrt_abstime last_vision_time = 0;
 
+						float vision_dt = (vision.timestamp_boot - last_vision_time) / 1e6f;
+						last_vision_time = vision.timestamp_boot;
+
+						if (vision_dt > 0.000001f && vision_dt < 0.2f) {
+							vision.vx = (vision.x - last_vision_x) / vision_dt;
+							vision.vy = (vision.y - last_vision_y) / vision_dt;
+							vision.vz = (vision.z - last_vision_z) / vision_dt;
+
+							last_vision_x = vision.x;
+							last_vision_y = vision.y;
+							last_vision_z = vision.z;
+
+							/* calculate correction for velocity */
+							corr_vision[0][1] = vision.vx - x_est[1];
+							corr_vision[1][1] = vision.vy - y_est[1];
+							corr_vision[2][1] = vision.vz - z_est[1];
+
+						} else {
+							/* assume zero motion */
+							corr_vision[0][1] = 0.0f - x_est[1];
+							corr_vision[1][1] = 0.0f - y_est[1];
+							corr_vision[2][1] = 0.0f - z_est[1];
+						}
+					}
 					vision_updates++;
 				}
 			}
@@ -938,7 +1035,7 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 		}
 
 		/* check for timeout on FLOW topic */
-		if ((flow_valid || lidar_valid) && t > (flow_time + flow_topic_timeout)) {
+		if ((flow_valid || sonar_valid) && t > (flow_time + flow_topic_timeout)) {
 			flow_valid = false;
 			warnx("FLOW timeout");
 			mavlink_log_info(mavlink_fd, "[inav] FLOW timeout");
@@ -966,10 +1063,10 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 		}
 
 		/* check for lidar measurement timeout */
-		if (lidar_valid && (t > (lidar_time + lidar_timeout))) {
-			lidar_valid = false;
-			warnx("LIDAR timeout");
-			mavlink_log_info(mavlink_fd, "[inav] LIDAR timeout");
+		if (sonar_valid && (t > (sonar_time + sonar_timeout))) {
+			sonar_valid = false;
+			warnx("SONAR timeout");
+			mavlink_log_info(mavlink_fd, "[inav] SONAR timeout");
 		}
 
 		float dt = t_prev > 0 ? (t - t_prev) / 1000000.0f : 0.0f;
@@ -1010,11 +1107,13 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 		bool use_flow = flow_valid && (flow_accurate || !use_gps_xy);
 
 		/* use LIDAR if it's valid and lidar altitude estimation is enabled */
-		use_lidar = lidar_valid && params.enable_lidar_alt_est;
+//MODIFICA: tolta la dipendenza dal parametro params.enable_lidar_alt_est che non è disponibile in qgroundcontrol
+		//use_sonar = sonar_valid && params.enable_lidar_alt_est;
+		use_sonar = sonar_valid;
 
 		bool can_estimate_xy = (eph < max_eph_epv) || use_gps_xy || use_flow || use_vision_xy || use_mocap;
 
-		bool dist_bottom_valid = (t < lidar_valid_time + lidar_valid_timeout);
+		bool dist_bottom_valid = (t < sonar_valid_time + sonar_valid_timeout);
 
 		float w_xy_gps_p = params.w_xy_gps_p * w_gps_xy;
 		float w_xy_gps_v = params.w_xy_gps_v * w_gps_xy;
@@ -1118,8 +1217,8 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 			accel_bias_corr[1] -= corr_flow[1] * params.w_xy_flow;
 		}
 
-		if (use_lidar) {
-			accel_bias_corr[2] -= corr_lidar * params.w_z_lidar * params.w_z_lidar;
+		if (use_sonar) {
+			accel_bias_corr[2] -= corr_sonar * params.w_z_lidar * params.w_z_lidar;
 		} else {
 			accel_bias_corr[2] -= corr_baro * params.w_z_baro * params.w_z_baro;
 		}
@@ -1148,8 +1247,8 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 		}
 
 		/* inertial filter correction for altitude */
-		if (use_lidar) {
-			inertial_filter_correct(corr_lidar, dt, z_est, 0, params.w_z_lidar);
+		if (use_sonar) {
+			inertial_filter_correct(corr_sonar, dt, z_est, 0, params.w_z_lidar);
 
 		} else {
 			inertial_filter_correct(corr_baro, dt, z_est, 0, params.w_z_baro);
