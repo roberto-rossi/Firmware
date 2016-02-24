@@ -81,6 +81,16 @@
 #include <uORB/topics/parameter_update.h>
 #include <uORB/topics/multirotor_motor_limits.h>
 #include <uORB/topics/mc_att_ctrl_status.h>
+    /** MC* ...........*/
+#include <uORB/topics/g_matrix.h>
+#include <uORB/topics/B_matrix.h>
+#include <uORB/topics/T_bw_matrix.h>
+#include <uORB/topics/Bb_tb_i_matrix.h>
+#include <uORB/topics/Bt_tb_i_matrix.h>
+#include <uORB/topics/Bb_tb_i_pinv_matrix.h>
+#include <uORB/topics/am_u_tbeta.h>
+#include <uORB/topics/am_flag.h>
+    /** MC* ...........*/
 #include <systemlib/param/param.h>
 #include <systemlib/err.h>
 #include <systemlib/perf_counter.h>
@@ -89,6 +99,8 @@
 #include <lib/mathlib/mathlib.h>
 #include <lib/geo/geo.h>
 #include <lib/tailsitter_recovery/tailsitter_recovery.h>
+
+#include "matrix/Matrix.hpp"
 
 /**
  * Multicopter attitude control app start / stop handling function
@@ -138,6 +150,28 @@ private:
 	int		_vehicle_status_sub;	/**< vehicle status subscription */
 	int 	_motor_limits_sub;		/**< motor limits subscription */
 
+    /** MC* ...........*/
+    int     _g_eta_sub;
+    int     _B_eta_sub;
+    int     _T_bw_sub;
+    int     _Bb_tb_i_sub;
+    int     _Bt_tb_i_sub;
+    int     _Bb_tb_i_pinv_sub;
+    int     _am_u_tbeta_sub;
+
+    orb_advert_t    _am_flag_pub;
+
+    struct g_matrix_s               _g_eta;
+    struct B_matrix_s               _B_eta;
+    struct T_bw_matrix_s            _T_bw;
+    struct Bb_tb_i_matrix_s         _Bb_tb_i;
+    struct Bt_tb_i_matrix_s         _Bt_tb_i;
+    struct Bb_tb_i_pinv_matrix_s    _Bb_tb_i_pinv;
+    struct am_u_tbeta_s             _am_u_tbeta;
+    struct am_flag_s                _am_flag;
+
+    /** MC* ...........*/
+
 	orb_advert_t	_v_rates_sp_pub;		/**< rate setpoint publication */
 	orb_advert_t	_actuators_0_pub;		/**< attitude actuator controls publication */
 	orb_advert_t	_controller_status_pub;	/**< controller status publication */
@@ -169,6 +203,33 @@ private:
 	math::Vector<3>		_att_control;	/**< attitude control vector */
 
 	math::Matrix<3, 3>  _I;				/**< identity matrix */
+
+	/** RR* ...........*/
+
+    /** Da Funzione principale*/
+    matrix::Vector<float,8> am_u_tbeta;
+    matrix::Vector<float,2> am_omega_xy_dot_ref;
+    matrix::Vector<float,8> am_u_tbeta_int_add;
+    matrix::Vector<float,2> am_omega_xy_dot_ref_int_add;
+    matrix::Vector<float,2> am_att_control_acc_i;
+    float am_thrust;
+    matrix::Vector<float,3> am_tau_quad;
+    matrix::Vector<float,4> am_tau_robot;
+
+	bool am_saturation_omega_thrust;
+	bool am_saturation_omega_tau_quad;
+	bool am_saturation_omega_tau_robot;
+    bool am_saturation_utb_thrust;
+	bool am_saturation_utb_tau_quad;
+	bool am_saturation_utb_tau_robot;
+    bool am_saturation_utbZ_thrust;
+	bool am_saturation_utbZ_tau_quad;
+	bool am_saturation_utbZ_tau_robot;
+
+    float ControlToActControl_T;
+	matrix::Vector<float,3> ControlToActControl_tau;
+
+    /** RR* ...........*/
 
 	struct {
 		param_t roll_p;
@@ -271,6 +332,7 @@ private:
 	 */
 	void		control_attitude_rates(float dt);
 
+    void        compute_final_torques();
 	/**
 	 * Check for vehicle status updates.
 	 */
@@ -312,6 +374,19 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_armed_sub(-1),
 	_vehicle_status_sub(-1),
 
+    /** MC* ...........*/
+    _g_eta_sub(-1),
+    _B_eta_sub(-1),
+    _T_bw_sub(-1),
+    _Bb_tb_i_sub(-1),
+    _Bt_tb_i_sub(-1),
+    _Bb_tb_i_pinv_sub(-1),
+    _am_u_tbeta_sub(-1),
+
+    _am_flag_pub(nullptr),
+
+    /** MC* ...........*/
+
 	/* publications */
 	_v_rates_sp_pub(nullptr),
 	_actuators_0_pub(nullptr),
@@ -339,6 +414,17 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	memset(&_controller_status, 0, sizeof(_controller_status));
 	_vehicle_status.is_rotary_wing = true;
 
+    /** MC* ...........*/
+	memset(&_g_eta, 0, sizeof(_g_eta));
+	memset(&_B_eta, 0, sizeof(_B_eta));
+	memset(&_T_bw, 0, sizeof(_T_bw));
+	memset(&_Bb_tb_i, 0, sizeof(_Bb_tb_i));
+    memset(&_Bt_tb_i, 0, sizeof(_Bt_tb_i));
+	memset(&_Bb_tb_i_pinv, 0, sizeof(_Bb_tb_i_pinv));
+	memset(&_am_u_tbeta, 0, sizeof(_am_u_tbeta));
+	memset(&_am_flag, 0, sizeof(_am_flag));
+    /** MC* ...........*/
+
 	_params.att_p.zero();
 	_params.rate_p.zero();
 	_params.rate_i.zero();
@@ -360,6 +446,11 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_rates_int.zero();
 	_thrust_sp = 0.0f;
 	_att_control.zero();
+	/** RR .........*/
+    am_att_control_acc_i.setZero();
+    ControlToActControl_T = 1.92e-02;
+    ControlToActControl_tau(0) = 6.53e-02; ControlToActControl_tau(1) = 1.624e-01; ControlToActControl_tau(2) = 5.376e-01;
+    /** RR .........*/
 
 	_I.identity();
 
@@ -399,7 +490,6 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 		// the vehicle is a tailsitter, use optimal recovery control strategy
 		_ts_opt_recovery = new TailsitterRecovery();
 	}
-
 
 }
 
@@ -739,6 +829,7 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	/* reset integral if disarmed */
 	if (!_armed.armed || !_vehicle_status.is_rotary_wing) {
 		_rates_int.zero();
+		am_att_control_acc_i.setZero();
 	}
 
 	/* current body angular rates */
@@ -749,17 +840,67 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
 	/* angular rates error */
 	math::Vector<3> rates_err = _rates_sp - rates;
-	_att_control = _params.rate_p.emult(rates_err) + _params.rate_d.emult(_rates_prev - rates) / dt + _rates_int +
+
+
+	/** RR* .................... */
+            /** Bww solo per controllo quadricottero*/
+	        math::Vector<3> Bww_r1(0.0429,0,0); math::Vector<3> Bww_r2(0,0.0269,0); math::Vector<3> Bww_r3(0,0,0.0721);
+            math::Matrix<3,3> Bww; Bww.set_row(0,Bww_r1); Bww.set_row(1,Bww_r2); Bww.set_row(2,Bww_r3);
+    /** Accelerazioni */
+	math::Vector<3> am_att_control_acc_pd = _params.rate_p.emult(rates_err) +  _params.rate_d.emult(_rates_prev - rates) / dt +
 		       _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
+
+            /** add to integral action?*/
+            math::Vector<3> _att_control_acc_i_add =  _params.rate_i.emult(rates_err) * dt;
+
+    matrix::Vector<float,2> am_omega_xy_dot_ref_int_add; am_omega_xy_dot_ref_int_add(0) = _att_control_acc_i_add(0);am_omega_xy_dot_ref_int_add(1) = _att_control_acc_i_add(1);
+
+    am_omega_xy_dot_ref(0) = am_att_control_acc_pd(0) + am_att_control_acc_i(0);
+    am_omega_xy_dot_ref(1) = am_att_control_acc_pd(1) + am_att_control_acc_i(1);
+
+    if (_v_control_mode.flag_control_offboard_enabled){
+        /** Calcola coppie finali e saturazioni*/
+            compute_final_torques();
+        /** Assegna coppie*/
+            for (int i = 0; i < 3; i++) {
+                    _att_control(i) = am_tau_quad(i);
+            }
+            am_thrust = am_thrust;
+            am_tau_robot = am_tau_robot;
+        /** Aggiorna Integrali*/
+            if (fabsf(am_thrust) > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
+                if (!am_saturation_omega_tau_quad && !am_saturation_omega_tau_robot && !am_saturation_omega_thrust){
+                    am_att_control_acc_i += am_omega_xy_dot_ref_int_add;
+                }
+            }
+
+    }else{
+        math::Vector<3> _att_control_pd; // =
+        math::Vector<3> am_tau_pd_aux = Bww*am_att_control_acc_pd;
+        for (int i = 0; i < 3; i++) {
+            _att_control_pd(i) = ControlToActControl_tau(i)*am_tau_pd_aux(i);
+        }
+        //math::Vector<3> _att_control_pd = (Bww*am_att_control_acc_pd);
+        _att_control = _att_control_pd  + _rates_int ;
+    }
+
+
 	_rates_sp_prev = _rates_sp;
 	_rates_prev = rates;
 
 	/* update integral only if not saturated on low limit and if motor commands are not saturated */
 	if (_thrust_sp > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
+
 		for (int i = 0; i < 3; i++) {
 			if (fabsf(_att_control(i)) < _thrust_sp) {
-				float rate_i = _rates_int(i) + _params.rate_i(i) * rates_err(i) * dt;
-
+                //float rate_i = _rates_int(i) +  _params.rate_i(i) * rates_err(i) * dt;
+				//float rate_i = _rates_int(i) + ControlToActControl_tau(i) * _params.rate_i(i) * rates_err(i) * dt;
+				float rate_i = _rates_int(i);
+				for (int j = 0; j < 3; j++) {
+                     rate_i += ControlToActControl_tau(i) * (Bww(i,j)*_att_control_acc_i_add(j));
+                     //rate_i += (Bww(i,j)*_att_control_acc_i(j));
+                }
+                /** RR* .................... */
 				if (PX4_ISFINITE(rate_i) && rate_i > -RATES_I_LIMIT && rate_i < RATES_I_LIMIT &&
 				    _att_control(i) > -RATES_I_LIMIT && _att_control(i) < RATES_I_LIMIT) {
 					_rates_int(i) = rate_i;
@@ -767,12 +908,386 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 			}
 		}
 	}
+
 }
 
 void
 MulticopterAttitudeControl::task_main_trampoline(int argc, char *argv[])
 {
 	mc_att_control::g_control->task_main();
+}
+
+void
+MulticopterAttitudeControl::compute_final_torques()
+/** oppure: void compute_final_torques(int argc, char *argv[])
+*/
+{
+/** Ho B_csi, g_csi, T_bw. Dentro la funzione mi si deve passare tau_b_inertia,beta_dot_ref, omega_dot_ref_xy
+*/
+
+/** Input: */
+    /** Da ORB */
+    matrix::Vector<float,10> am_g_eta;//(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0);
+    matrix::Matrix<float,10,10> am_B_eta;//(0,0,0,0,0,0,0,0,0,0);
+    matrix::Matrix<float,6,2> am_T_betaw;
+
+    bool updated;
+        orb_check(_am_u_tbeta_sub, &updated);
+        if (updated) {
+            orb_copy(ORB_ID(am_u_tbeta), _am_u_tbeta_sub, &_am_u_tbeta);
+        }
+        orb_check(_g_eta_sub, &updated);
+        if (updated) {
+            orb_copy(ORB_ID(g_matrix), _g_eta_sub, &_g_eta);
+        }
+        orb_check(_B_eta_sub, &updated);
+                if (updated) {
+                    orb_copy(ORB_ID(B_matrix), _B_eta_sub, &_B_eta);
+                }
+        orb_check(_T_bw_sub, &updated);
+                if (updated) {
+                    orb_copy(ORB_ID(T_bw_matrix), _T_bw_sub, &_T_bw);
+                }
+
+    for (int i = 0; i < 8; ++i) {
+        am_u_tbeta(i)=_am_u_tbeta.am_u_tbeta[i];
+        am_u_tbeta_int_add(i)=_am_u_tbeta.am_u_tbeta_int_add[i];
+        }
+
+    for (int i = 0; i < 10; ++i) {
+        am_g_eta(i)=_g_eta.g[i];
+        for (int j = 0; j < 10; ++j) {
+            am_B_eta(i,j)=_B_eta.B[i+10*j];
+        }
+    }// DA VERIFICARE!
+    for (int i = 0; i < 6; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            am_T_betaw(i,j)=_T_bw.T_bw[i+6*j];
+        }
+    }// DA VERIFICARE!
+
+    matrix::Matrix<float,8,2> am_Bt_tb_i;
+    matrix::Matrix<float,8,6> am_Bb_tb_i;
+    matrix::Matrix<float,6,8> am_Bb_tb_i_pinv;
+
+    orb_check(_Bt_tb_i_sub, &updated);
+        if (updated) {
+            orb_copy(ORB_ID(Bt_tb_i_matrix), _Bt_tb_i_sub, &_Bt_tb_i);
+        }
+        orb_check(_Bb_tb_i_sub, &updated);
+                if (updated) {
+                    orb_copy(ORB_ID(Bb_tb_i_matrix), _Bb_tb_i_sub, &_Bb_tb_i);
+                }
+        orb_check(_Bb_tb_i_pinv_sub, &updated);
+                if (updated) {
+                    orb_copy(ORB_ID(Bb_tb_i_pinv_matrix), _Bb_tb_i_pinv_sub, &_Bb_tb_i_pinv);
+                }
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            am_Bt_tb_i(i,j)=_Bt_tb_i.Bt_tb_i[i+8*j];
+        }
+    }// DA VERIFICARE!
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 6; ++j) {
+            am_Bb_tb_i(i,j)=_Bb_tb_i.Bb_tb_i[i+8*j];
+        }
+    }// DA VERIFICARE!
+    for (int i = 0; i < 6; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            am_Bb_tb_i_pinv(i,j)=_Bb_tb_i_pinv.Bb_tb_i_pinv[i+6*j];
+        }
+    }// DA VERIFICARE!
+
+/** Submatrices: */
+    matrix::Vector<float,2> am_g_t;
+    matrix::Vector<float,2> am_g_w;//(0,0,0,0,0,0,0,0,0,0);
+    matrix::Vector<float,6> am_g_beta;//(0,0,0,0,0,0,0,0,0,0);
+    matrix::Matrix<float,2,2> am_B_ww;// am_B_ww.set_row(0,Bww_r1); am_B_ww.set_row(1,Bww_r2); am_B_ww.set_row(2,Bww_r3);
+    matrix::Matrix<float,6,2> am_B_betaw;
+    matrix::Matrix<float,2,6> am_B_wbeta;
+
+/** Intermediate variables: */
+
+
+    matrix::Vector<float,6> am_tau_beta_in;
+    matrix::Vector<float,8> am_effec_tau;
+    matrix::Matrix<float,8,8> am_B_tb_i;
+    matrix::Matrix<float,6,6> am_Bbb_tb_i;
+
+    matrix::Vector<float,6> am_beta_dot_ref;
+
+    matrix::Vector<float,6> am_tau_beta;
+    matrix::Vector<float,2> am_tau_omega_xy;
+    matrix::Matrix<float,2,6> am_T_betaw_t;
+    matrix::Vector<float,2> am_tau_omega_in;
+
+    matrix::Vector<float,2> am_tau_quad_int_add_aux;
+    matrix::Vector<float,2> am_tau_quad_int_add;
+    matrix::Vector<float,6> am_tau_beta_int_add;
+
+/** Output: */
+
+
+/** Extract Submatrices: */
+    //C_betav =
+    //C_wv =
+        /** am_g_t; */
+    for (int i = 0; i < 2; i++) {
+            am_g_t(i) = am_g_eta(i);
+    }
+    for (int j = 2; j < 4; j++) {
+        am_g_w(j-2) = am_g_eta(j);
+    }
+    for (int j = 4; j < 10; j++) {
+        am_g_beta(j-4) = am_g_eta(j);
+    }
+
+    for (int i = 2; i < 4; i++) {
+        for (int j = 2; j < 4; j++) {
+            am_B_ww(i-2,j-2) = am_B_eta(i,j);
+        }
+    }
+    for (int i = 4; i < 10; i++) {
+        for (int j = 2; j < 4; j++) {
+            am_B_betaw(i-4,j-2) = am_B_eta(i,j);
+            am_B_wbeta(j-2,i-4) = am_B_eta(i,j);
+        }
+    }
+
+
+    /** am_B_tb_i; */
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+            if(j<2){
+                am_B_tb_i(i,j) = am_Bt_tb_i(i,j);
+            }
+            else{
+                am_B_tb_i(i,j) = am_Bb_tb_i(i,j-2);
+                if (i>1){
+                    am_Bbb_tb_i(i-2,j-2) = am_Bb_tb_i(i,j-2);
+                }
+            }
+        }
+    }
+
+
+/** Calcola le tau_beta_in con Bb_tb_i, Bb_tb_i_pinv, g. */
+    am_tau_beta_in = am_Bb_tb_i_pinv*(am_u_tbeta + am_Bt_tb_i*am_g_t);
+
+    /** am_effec_tau; */
+    for (int i = 0; i < 8; i++) {
+        if(i<2){
+            am_effec_tau(i) = -am_g_t(i);
+        }
+        else{
+            am_effec_tau(i) = am_tau_beta_in(i-2);
+        }
+    }
+
+    /** Calcola le tb_dot_ref con Bb_tb_i, Bt_tb_i, g, tau_beta_in. */
+    am_beta_dot_ref = am_Bb_tb_i.transpose()*am_effec_tau;
+
+    /** Tau_beta = tau_b_inertia + (C_betav + g_beta) + (B_betaw * omega_dot_ref) */
+    am_tau_beta = am_g_beta + am_tau_beta_in + am_B_betaw*am_omega_xy_dot_ref;
+
+    /** Tau_omega_xy = (B_ww * omega_dot_ref_xy) + (B_wbeta * beta_dot_ref) + (C_wv + g_w) */
+    am_tau_omega_xy = am_B_ww*am_omega_xy_dot_ref + (am_B_wbeta*am_beta_dot_ref) +  am_g_w;
+
+    am_T_betaw_t = am_T_betaw.transpose();
+
+    /** Restituisce tau_quad, Thrust, Tau_robot*/
+            float am_thr_max = 0.9; // CONTROLLA!!!!!
+            float am_thr_min = 0.1; // CONTROLLA!!!!!
+            float am_tau_quad_max = 0.3;
+            float am_tau_robot_max = 1.5;
+
+    /** Restituisce Thrust*/
+    am_thrust = ControlToActControl_T*am_tau_beta(0);
+        /** CONTROLLO su thrust max */
+        if (fabsf(am_thrust) > am_thr_max){
+            am_thrust = -am_thr_max;
+        }
+        else if (fabsf(am_thrust) < am_thr_min){
+            am_thrust = -am_thr_min;
+        }
+
+    /** Restituisce Tau_quad*/
+            am_tau_quad(2)  =   ControlToActControl_tau(2)*am_tau_beta(1);
+            am_tau_quad(0)  =   ControlToActControl_tau(0)*am_tau_omega_xy(0);
+            am_tau_quad(1)  =   ControlToActControl_tau(1)*am_tau_omega_xy(1);
+
+        /** Tau_omega_xy_0 = Tau_omega_xy + T_bw^T * Tau_beta; */
+        for (int j = 0; j < 6; j++) {
+            am_tau_quad(0) += am_T_betaw_t(0,j)*am_tau_beta(j);
+            am_tau_quad(1) += am_T_betaw_t(1,j)*am_tau_beta(j);
+        }
+
+        /** CONTROLLO su Tau_quad max */
+            for (int i = 0; i < 3; i++) {
+                if (am_tau_quad(i) > am_tau_quad_max){
+                    am_tau_quad(i)  = am_tau_quad_max;
+                }
+                else if (am_tau_quad(i)  < -am_tau_quad_max){
+                    am_tau_quad(i)  = -am_tau_quad_max;
+                }
+            }
+
+    /** Restituisce Tau_robot*/
+    for (int j = 0; j < 4; j++) {
+        am_tau_robot(j) = am_tau_beta(j+2);
+    }
+        /** CONTROLLO su Tau_robot max */
+            for (int i = 0; i < 4; i++) {
+                if (am_tau_robot(i) > am_tau_robot_max){
+                    am_tau_robot(i)  = am_tau_robot_max;
+                }
+                else if (am_tau_robot(i)  < -am_tau_robot_max){
+                    am_tau_robot(i)  = -am_tau_quad_max;
+                }
+            }
+
+    /** Saturation of Integral Action */
+
+        /** Effect of am_u_tbeta_Z_int_add */
+            float am_u_tbeta_Z_int_add = am_u_tbeta_int_add(2);
+            matrix::Vector<float,8> am_u_tbeta_int_add_noZ = am_u_tbeta_int_add;
+            am_u_tbeta_int_add_noZ(2) = 0.0;
+
+            matrix::Vector<float,6> am_BZ_tb_i_pinv;
+                for (int j = 0; j < 6; j++) {
+                    am_BZ_tb_i_pinv(j) = am_Bb_tb_i_pinv(j,2);
+                }
+
+            matrix::Vector<float,6> am_tau_utb_Z_aux = am_BZ_tb_i_pinv*am_u_tbeta_Z_int_add;
+
+                am_tau_quad_int_add_aux = (am_B_wbeta*am_Bbb_tb_i + am_T_betaw_t)*am_tau_utb_Z_aux;
+            am_tau_quad_int_add(0)  =   am_tau_quad(0) + ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
+            am_tau_quad_int_add(1)  =   am_tau_quad(1) + ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
+            am_tau_beta_int_add     =   am_tau_beta + am_tau_utb_Z_aux;
+
+            /** SATURA?*/
+            // TODO
+                am_saturation_utbZ_thrust = false;
+                if (ControlToActControl_T*fabsf(am_tau_beta_int_add(0))>am_thr_max){
+                        am_saturation_utbZ_thrust = true;
+                }
+
+                am_saturation_utbZ_tau_quad = false;
+                if (fabsf(am_thrust) > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
+                    for (int j = 0; j < 2; j++) {
+                        if (fabsf(am_tau_quad_int_add(j))>am_tau_quad_max || fabsf(am_tau_quad_int_add(j)) > fabsf(am_thrust)){
+                            am_saturation_utbZ_tau_quad = true;
+                        }
+                    }
+                        float am_tau_yaw_aux = fabsf(ControlToActControl_tau(2)*am_tau_beta_int_add(1));
+                        if (am_tau_yaw_aux>am_tau_quad_max || fabsf(am_tau_yaw_aux) > fabsf(am_thrust)){
+                            am_saturation_utbZ_tau_quad = true;
+                        }
+                }
+
+                am_saturation_utbZ_tau_robot = false;
+                for (int j = 2; j < 6; j++) {
+                    if (fabsf(am_tau_beta_int_add(j))>am_tau_robot_max){
+                        am_saturation_utbZ_tau_robot = true;
+                    }
+                }
+
+        /** Effect of omega_dot_ref */
+
+                am_tau_quad_int_add_aux = (am_B_ww + am_T_betaw_t*am_B_betaw)*am_omega_xy_dot_ref_int_add;
+                if (!am_saturation_utbZ_thrust && !am_saturation_utbZ_tau_robot && !am_saturation_utbZ_thrust){
+                    am_tau_quad_int_add(0)  +=   ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
+                    am_tau_quad_int_add(1)  +=   ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
+                    am_tau_beta_int_add     +=   am_B_betaw*am_omega_xy_dot_ref_int_add;
+                }else{
+                    am_tau_quad_int_add(0)  =   am_tau_quad(0) + ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
+                    am_tau_quad_int_add(1)  =   am_tau_quad(1) + ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
+                    am_tau_beta_int_add     =   am_tau_beta + am_B_betaw*am_omega_xy_dot_ref_int_add;
+                }
+
+
+            /** SATURA?*/
+                //TODO
+                am_saturation_omega_thrust = false;
+
+                if (ControlToActControl_T*fabsf(am_tau_beta_int_add(0))>am_thr_max){
+                        am_saturation_omega_thrust = true;
+                }
+                am_saturation_omega_tau_quad = false;
+                if (fabsf(am_thrust) > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
+                    for (int j = 0; j < 2; j++) {
+                        if (fabsf(am_tau_quad_int_add(j))>am_tau_quad_max || fabsf(am_tau_quad_int_add(j)) > fabsf(am_thrust) ){
+                            am_saturation_omega_tau_quad = true;
+                        }
+                    }
+                    float am_tau_yaw_aux = fabsf(ControlToActControl_tau(2)*am_tau_beta_int_add(1));
+                        if (am_tau_yaw_aux>am_tau_quad_max || fabsf(am_tau_yaw_aux) > fabsf(am_thrust)){
+                            am_saturation_omega_tau_quad = true;
+                        }
+                }
+
+                am_saturation_omega_tau_robot = false;
+                for (int j = 2; j < 6; j++) {
+                    if (fabsf(am_tau_beta_int_add(j))>am_tau_robot_max){
+                        am_saturation_omega_tau_robot = true;
+                    }
+                }
+
+        /** Effect of tbeta_dot_ref */
+
+                 if (am_saturation_omega_tau_quad || am_saturation_omega_tau_robot || am_saturation_omega_thrust){
+                     // Leva l'incremento di coppia dovuto a omega
+                    am_tau_quad_int_add(0)  -=   ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
+                    am_tau_quad_int_add(1)  -=   ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
+                    am_tau_beta_int_add     -=   am_B_betaw*am_omega_xy_dot_ref_int_add;
+                }
+
+                matrix::Vector<float,6> am_tau_utb_aux = am_Bb_tb_i_pinv*am_u_tbeta_int_add_noZ;
+                    am_tau_quad_int_add_aux = (am_B_wbeta*am_Bbb_tb_i + am_T_betaw_t)*am_tau_utb_aux;
+
+                am_tau_quad_int_add(0)  +=   ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
+                am_tau_quad_int_add(1)  +=   ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
+                am_tau_beta_int_add     +=   am_tau_utb_aux;
+
+            /** SATURA?*/
+            // TODO
+                am_saturation_utb_thrust = false;
+                if (ControlToActControl_T*fabsf(am_tau_beta_int_add(0))>am_thr_max){
+                        am_saturation_utb_thrust = true;
+                }
+
+                am_saturation_utb_tau_quad = false;
+                if (fabsf(am_thrust) > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
+                    for (int j = 0; j < 2; j++) {
+                        if (fabsf(am_tau_quad_int_add(j))>am_tau_quad_max || fabsf(am_tau_quad_int_add(j)) > fabsf(am_thrust)){
+                            am_saturation_utb_tau_quad = true;
+                        }
+                    }
+                        float am_tau_yaw_aux = fabsf(ControlToActControl_tau(2)*am_tau_beta_int_add(1));
+                        if (am_tau_yaw_aux>am_tau_quad_max || fabsf(am_tau_yaw_aux) > fabsf(am_thrust)){
+                            am_saturation_utb_tau_quad = true;
+                        }
+                }
+
+                am_saturation_utb_tau_robot = false;
+                for (int j = 2; j < 6; j++) {
+                    if (fabsf(am_tau_beta_int_add(j))>am_tau_robot_max){
+                        am_saturation_utb_tau_robot = true;
+                    }
+                }
+
+                _am_flag.am_saturation_utbZ_tau_quad = am_saturation_utbZ_tau_quad;
+                _am_flag.am_saturation_utbZ_tau_robot = am_saturation_utbZ_tau_robot;
+                _am_flag.am_saturation_utbZ_thrust = am_saturation_utbZ_thrust;
+                _am_flag.am_saturation_utb_tau_quad = am_saturation_utb_tau_quad;
+                _am_flag.am_saturation_utb_tau_robot = am_saturation_utb_tau_robot;
+                _am_flag.am_saturation_utb_thrust = am_saturation_utb_thrust;
+
+                if (_am_flag_pub != nullptr) {
+                        orb_publish(ORB_ID(am_flag), _am_flag_pub, &_am_flag);
+                    } else {
+                        _am_flag_pub = orb_advertise(ORB_ID(am_flag), &_am_flag);
+                    }
 }
 
 void
@@ -813,7 +1328,7 @@ MulticopterAttitudeControl::task_main()
 
 		/* this is undesirable but not much we can do - might want to flag unhappy status */
 		if (pret < 0) {
-			warn("mc att ctrl: poll error %d, %d", pret, errno);
+			warn("poll error %d, %d", pret, errno);
 			/* sleep a bit before next try */
 			usleep(100000);
 			continue;

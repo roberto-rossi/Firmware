@@ -66,6 +66,7 @@
 //MODIFICA per invio delle matrici
 #include "topics/B_matrix.h"
 #include "topics/Bb_tb_i_matrix.h"
+#include "topics/Bt_tb_i_matrix.h"
 #include "topics/Bb_tb_i_pinv_matrix.h"
 #include "topics/T_bw_matrix.h"
 #include "topics/g_matrix.h"
@@ -74,6 +75,8 @@
 #include "topics/csi.h"
 #include "topics/csi_dot.h"
 #include "topics/polimi_attitude_ned.h"
+#include "topics/am_flag.h"
+#include "topics/am_u_tbeta.h"
 //FINE MODIFICA
 
 #include <px4_defines.h>
@@ -181,6 +184,7 @@ template class __EXPORT Subscription<vision_position_estimate_s>;
 //MODIFICA per invio delle matrici
 template class __EXPORT Subscription<B_matrix_s>;
 template class __EXPORT Subscription<Bb_tb_i_matrix_s>;
+template class __EXPORT Subscription<Bt_tb_i_matrix_s>;
 template class __EXPORT Subscription<Bb_tb_i_pinv_matrix_s>;
 template class __EXPORT Subscription<T_bw_matrix_s>;
 template class __EXPORT Subscription<g_matrix_s>;
@@ -189,6 +193,8 @@ template class __EXPORT Subscription<csi_dot_r_s>;
 template class __EXPORT Subscription<csi_s>;
 template class __EXPORT Subscription<csi_dot_s>;
 template class __EXPORT Subscription<polimi_attitude_ned_s>;
+template class __EXPORT Subscription<am_flag_s>;
+template class __EXPORT Subscription<am_u_tbeta_s>;
 //FINE MODIFICA
 
 } // namespace uORB

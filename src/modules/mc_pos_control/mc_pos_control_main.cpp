@@ -65,6 +65,8 @@
 #include <drivers/drv_hrt.h>
 #include <arch/board/board.h>
 
+#include "matrix/Matrix.hpp"
+
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/actuator_controls.h>
 #include <uORB/topics/vehicle_rates_setpoint.h>
@@ -77,6 +79,17 @@
 #include <uORB/topics/position_setpoint_triplet.h>
 #include <uORB/topics/vehicle_global_velocity_setpoint.h>
 #include <uORB/topics/vehicle_local_position_setpoint.h>
+/** MC* ...........*/
+#include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/csi.h>
+#include <uORB/topics/csi_dot.h>
+#include <uORB/topics/csi_r.h>
+#include <uORB/topics/csi_dot_r.h>
+#include <uORB/topics/g_matrix.h>
+#include <uORB/topics/B_matrix.h>
+#include <uORB/topics/am_flag.h>
+#include <uORB/topics/am_u_tbeta.h>
+/** MC* ...........*/
 
 #include <systemlib/systemlib.h>
 #include <mathlib/mathlib.h>
@@ -138,6 +151,43 @@ private:
 	int		_pos_sp_triplet_sub;		/**< position setpoint triplet */
 	int		_local_pos_sp_sub;		/**< offboard local position setpoint */
 	int		_global_vel_sp_sub;		/**< offboard global velocity setpoint */
+
+    /** MC* ...........*/
+    int     _attitude_sub;
+    int     _csi_sub;
+    int     _csi_dot_sub;
+    int     _csi_r_sub;
+    int     _csi_r_dot_sub;
+    int     _g_sub;
+    int     _B_sub;
+    int     _am_flag_sub;
+
+    orb_advert_t    _csi_pub;
+    orb_advert_t    _csi_dot_pub;
+    orb_advert_t    _csi_r_pub;
+    orb_advert_t    _csi_r_dot_pub;
+    orb_advert_t    _am_u_tbeta_pub;
+
+    struct vehicle_attitude_s     _vehicle_attitude;
+    struct csi_s                  _csi;
+    struct csi_dot_s              _csi_dot;
+    struct csi_r_s                _csi_r;
+    struct csi_dot_r_s            _csi_r_dot;
+    struct g_matrix_s             _g_eta;
+    struct B_matrix_s             _B_eta;
+    struct am_flag_s              _am_flag;
+    struct am_u_tbeta_s           _am_u_tbeta;
+
+    matrix::Vector<float,8> am_u_tbeta_int;
+    matrix::Vector<float,8> am_err_p;
+    matrix::Vector<float,8> am_err_v;
+    matrix::Vector<float,8> am_err_v_old;
+    matrix::Vector<float,8> Kpp;
+    matrix::Vector<float,8> Kpv;
+    matrix::Vector<float,8> Kiv;
+
+    hrt_abstime Ts_prev;
+    /** MC* ...........*/
 
 	orb_advert_t	_att_sp_pub;			/**< attitude setpoint publication */
 	orb_advert_t	_local_pos_sp_pub;		/**< vehicle local position setpoint publication */
@@ -251,6 +301,18 @@ private:
 	float _acc_z_lp;
 	float _takeoff_thrust_sp;
 
+	/** RR* ..................... */
+	bool am_saturation_utb_thrust_Fxyz;
+        /** Input: */
+    matrix::Vector<float,8> am_u_tbeta;
+    matrix::Vector<float,8> am_u_tbeta_int_add;
+        /** Output: */
+    matrix::Vector<float,3> am_Fxyz;
+
+    float ControlToActControl_T;// b = zeros(4,1);
+    float Mass_quadrotor; // no battery
+    /** RR* ..................... */
+
 	/**
 	 * Update our local parameter cache.
 	 */
@@ -324,6 +386,16 @@ private:
 	 */
 	static void	task_main_trampoline(int argc, char *argv[]);
 
+    /** MC* ...............*/
+    void         compute_utbeta();
+    /** MC* ...............*/
+
+	/** RR* compute tau arm and F quad
+	*/
+	void         compute_tautbeta();
+	/** RR* ...............
+	*/
+
 	/**
 	 * Main sensor collection task.
 	 */
@@ -353,6 +425,23 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_pos_sp_triplet_sub(-1),
 	_global_vel_sp_sub(-1),
 
+    /** MC* ...........*/
+    _attitude_sub(-1),
+    _csi_sub(-1),
+    _csi_dot_sub(-1),
+    _csi_r_sub(-1),
+    _csi_r_dot_sub(-1),
+    _g_sub(-1),
+    _B_sub(-1),
+    _am_flag_sub(-1),
+
+    _csi_pub(nullptr),
+    _csi_dot_pub(nullptr),
+    _csi_r_pub(nullptr),
+    _csi_r_dot_pub(nullptr),
+    _am_u_tbeta_pub(nullptr),
+    /** MC* ...........*/
+
 	/* publications */
 	_att_sp_pub(nullptr),
 	_local_pos_sp_pub(nullptr),
@@ -379,6 +468,8 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_vel_z_lp(0),
 	_acc_z_lp(0),
 	_takeoff_thrust_sp(0.0f)
+
+
 {
 	memset(&_vehicle_status, 0, sizeof(_vehicle_status));
 	memset(&_ctrl_state, 0, sizeof(_ctrl_state));
@@ -393,6 +484,18 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	memset(&_global_vel_sp, 0, sizeof(_global_vel_sp));
 
 	memset(&_ref_pos, 0, sizeof(_ref_pos));
+
+    /** MC* ...............*/
+    memset(&_vehicle_attitude, 0, sizeof(_vehicle_attitude));
+    memset(&_csi, 0, sizeof(_csi));
+    memset(&_csi_r, 0, sizeof(_csi_r));
+    memset(&_csi_dot, 0, sizeof(_csi_dot));
+    memset(&_csi_r_dot, 0, sizeof(_csi_r_dot));
+    memset(&_g_eta, 0, sizeof(_g_eta));
+    memset(&_B_eta, 0, sizeof(_B_eta));
+    memset(&_am_flag, 0, sizeof(_am_flag));
+    memset(&_am_u_tbeta, 0, sizeof(_am_u_tbeta));
+    /** MC* ...............*/
 
 	_params.pos_p.zero();
 	_params.vel_p.zero();
@@ -445,6 +548,12 @@ MulticopterPositionControl::MulticopterPositionControl() :
 
 	/* fetch initial parameter values */
 	parameters_update(true);
+
+
+    /** RR* ....................*/
+    ControlToActControl_T = 1.92e-02;// b = zeros(4,1);
+    Mass_quadrotor = 2.4259; // no battery
+    /** RR* ....................*/
 }
 
 MulticopterPositionControl::~MulticopterPositionControl()
@@ -908,14 +1017,9 @@ MulticopterPositionControl::cross_sphere_line(const math::Vector<3> &sphere_c, f
 
 void MulticopterPositionControl::control_auto(float dt)
 {
-	/* reset position setpoint on AUTO mode activation or when reentering MC mode */
-	if (!_mode_auto || _vehicle_status.in_transition_mode || !_vehicle_status.is_rotary_wing) {
+	if (!_mode_auto) {
 		_mode_auto = true;
-
-		if (_vehicle_status.in_transition_mode || !_vehicle_status.is_rotary_wing) {
-			_reset_pos_sp = true;
-			_reset_alt_sp = true;
-		}
+		/* reset position setpoint on AUTO mode activation */
 		reset_pos_sp();
 		reset_alt_sp();
 		/* set current velocity as last target velocity to smooth out transition */
@@ -1076,7 +1180,7 @@ void MulticopterPositionControl::control_auto(float dt)
 			_att_sp.yaw_body = _pos_sp_triplet.current.yaw;
 		}
 
-		/* 
+		/*
 		 * if we're already near the current takeoff setpoint don't reset in case we switch back to posctl.
 		 * this makes the takeoff finish smoothly.
 		 */
@@ -1120,6 +1224,15 @@ MulticopterPositionControl::task_main()
 	_local_pos_sp_sub = orb_subscribe(ORB_ID(vehicle_local_position_setpoint));
 	_global_vel_sp_sub = orb_subscribe(ORB_ID(vehicle_global_velocity_setpoint));
 
+    /** MC* ...........*/
+    _attitude_sub = orb_subscribe(ORB_ID(vehicle_attitude));
+    _csi_sub = orb_subscribe(ORB_ID(csi));
+    _csi_dot_sub = orb_subscribe(ORB_ID(csi_dot));
+    _csi_r_sub = orb_subscribe(ORB_ID(csi_r));
+    _csi_r_dot_sub = orb_subscribe(ORB_ID(csi_dot_r));
+    _am_flag_sub = orb_subscribe(ORB_ID(am_flag));
+    Ts_prev = 0;
+    /** MC* ...........*/
 
 	parameters_update(true);
 
@@ -1365,10 +1478,9 @@ MulticopterPositionControl::task_main()
 					_vel_sp(2) = _params.land_speed;
 				}
 
-				/* special thrust setpoint generation for takeoff from ground */
+				/* velocity handling during takeoff */
 				if (!_control_mode.flag_control_manual_enabled && _pos_sp_triplet.current.valid
-				    && _pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_TAKEOFF
-				    && _control_mode.flag_armed) {
+				    && _pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_TAKEOFF) {
 
 					// check if we are not already in air.
 					// if yes then we don't need a jumped takeoff anymore
@@ -1479,7 +1591,39 @@ MulticopterPositionControl::task_main()
 
 					/* thrust vector in NED frame */
 					// TODO?: + _vel_sp.emult(_params.vel_ff)
-					math::Vector<3> thrust_sp = vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) + thrust_int;
+
+					/** RR* ............. */
+					compute_utbeta();
+
+					math::Vector<3> thrust_sp;
+
+				    bool updated;
+				    orb_check(_am_flag_sub, &updated);
+				    if (updated) {
+				        orb_copy(ORB_ID(am_flag), _am_flag_sub, &_am_flag);
+				    }
+
+                    if (_control_mode.flag_control_offboard_enabled){
+                        compute_tautbeta();
+                        for (int i = 0; i < 3; i++) {
+                             thrust_sp(i) = ControlToActControl_T*am_Fxyz(i);
+                            /** Aggiorna Integrali */
+                                if (!_am_flag.am_saturation_utbZ_tau_quad && !_am_flag.am_saturation_utbZ_tau_robot && !_am_flag.am_saturation_utbZ_thrust){ //CORRETTO THRUST CON QUAD, GIUSTO?
+                                    am_u_tbeta_int(2) += am_u_tbeta_int_add(2);
+                                    am_u_tbeta_int_add(2) = 0.0;
+                                }
+                                if (!_am_flag.am_saturation_utb_tau_quad && !_am_flag.am_saturation_utb_tau_robot && !_am_flag.am_saturation_utb_thrust && !am_saturation_utb_thrust_Fxyz){
+                                    am_u_tbeta_int += am_u_tbeta_int_add;
+                                }
+                        }
+
+                    }else{
+                        thrust_sp = ( vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) )*Mass_quadrotor*ControlToActControl_T + thrust_int; // DA PENSARE SE AGGIUNGERE GRAVITA'!!!
+                        //math::Vector<3> AM_Thrust = vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) + thrust_int;
+                    }
+
+
+                   	/** RR* ............. */
 
 					if (_pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_TAKEOFF
 							&& !_takeoff_jumped && !_control_mode.flag_control_manual_enabled) {
@@ -1637,19 +1781,22 @@ MulticopterPositionControl::task_main()
 					}
 
 					/* update integrals */
+
+                    /** RR* ............. */
 					if (_control_mode.flag_control_velocity_enabled && !saturation_xy) {
-						thrust_int(0) += vel_err(0) * _params.vel_i(0) * dt;
-						thrust_int(1) += vel_err(1) * _params.vel_i(1) * dt;
+						thrust_int(0) += ControlToActControl_T * Mass_quadrotor * vel_err(0) * _params.vel_i(0) * dt;
+						thrust_int(1) += ControlToActControl_T * Mass_quadrotor * vel_err(1) * _params.vel_i(1) * dt;
 					}
 
 					if (_control_mode.flag_control_climb_rate_enabled && !saturation_z) {
-						thrust_int(2) += vel_err(2) * _params.vel_i(2) * dt;
+						thrust_int(2) += ControlToActControl_T * Mass_quadrotor * vel_err(2) * _params.vel_i(2) * dt;
 
 						/* protection against flipping on ground when landing */
 						if (thrust_int(2) > 0.0f) {
 							thrust_int(2) = 0.0f;
 						}
 					}
+                    /** RR* ............. */
 
 					/* calculate attitude setpoint from thrust vector */
 					if (_control_mode.flag_control_velocity_enabled) {
@@ -1886,7 +2033,7 @@ MulticopterPositionControl::start()
 	_control_task = px4_task_spawn_cmd("mc_pos_control",
 					   SCHED_DEFAULT,
 					   SCHED_PRIORITY_MAX - 5,
-					   1900,
+					   1500,
 					   (px4_main_t)&MulticopterPositionControl::task_main_trampoline,
 					   nullptr);
 
@@ -1897,6 +2044,173 @@ MulticopterPositionControl::start()
 
 	return OK;
 }
+
+/** MC* ....................*/
+void MulticopterPositionControl::compute_utbeta()
+{
+//    matrix::Vector<float,8> am_u_tbeta;
+//    matrix::Vector<float,8> am_u_tbeta_int_add;
+
+    //Lettura uOrb
+    bool updated;
+    orb_check(_attitude_sub, &updated);
+    if (updated) {
+        orb_copy(ORB_ID(vehicle_attitude), _attitude_sub, &_vehicle_attitude);
+    }
+    orb_check(_csi_sub, &updated);
+        if (updated) {
+            orb_copy(ORB_ID(csi), _csi_sub, &_csi);
+        }
+    orb_check(_csi_r_sub, &updated);
+        if (updated) {
+            orb_copy(ORB_ID(csi_r), _csi_r_sub, &_csi_r);
+        }
+    orb_check(_csi_dot_sub, &updated);
+        if (updated) {
+            orb_copy(ORB_ID(csi_dot), _csi_dot_sub, &_csi_dot);
+        }
+    orb_check(_csi_r_dot_sub, &updated);
+        if (updated) {
+            orb_copy(ORB_ID(csi_dot_r), _csi_r_dot_sub, &_csi_r_dot);
+        }
+    //Copia valori di attitude nella variabile csi
+        //LOCAL PRESO CON IL VALORE DIRETTO DA UORB O CONTROLLATO?
+    _csi.csi[0]=_local_pos.x;
+    _csi.csi[1]=_local_pos.y;
+    _csi.csi[2]=_local_pos.z;
+    _csi.csi[3]=_vehicle_attitude.roll;
+    _csi.csi[4]=_vehicle_attitude.pitch;
+    _csi.csi[5]=_vehicle_attitude.yaw;
+    _csi_dot.csi_dot[0]=_local_pos.vx;
+    _csi_dot.csi_dot[1]=_local_pos.vy;
+    _csi_dot.csi_dot[2]=_local_pos.vz;
+    _csi_dot.csi_dot[3]=_vehicle_attitude.rollspeed;
+    _csi_dot.csi_dot[4]=_vehicle_attitude.pitchspeed;
+    _csi_dot.csi_dot[5]=_vehicle_attitude.yawspeed;
+
+    hrt_abstime t = hrt_absolute_time();
+    float Ts = Ts_prev != 0 ? (t - Ts_prev) * 0.000001f : 0.0f;
+    Ts_prev = t;
+    //Calcolo u_tbeta (Incrociato perchè non calcolato per roll e pitch)
+    int k;
+    for (int i = 0; i < 8; ++i) {
+        k = i;
+        if (i>2)
+            k = i + 2;
+        //Calcolo errore di posizione
+        am_err_p(i)=_csi_r.csi_r[k] - _csi.csi[k];
+        //Calcolo errore velocità + FeedForward
+        const float Fv = 0.3;
+        am_err_v(i) = am_err_p(i)*Kpp(i) + _csi_r_dot.csi_r_dot[k]*Fv - _csi_dot.csi_dot[k];
+        //Calcolo coppia proporzionale
+        am_u_tbeta(i) = am_err_v(i)*Kpv(i) + am_u_tbeta_int(i); //VETTORI INIZIALIZZATI A 0?
+        //Calcolo coppia integrale
+        am_u_tbeta_int_add(i) = am_err_v(i)*Kiv(i)*Ts; //CONTROLLARE CALCOLO TS
+//        if (true) //SCRIVERE CONDIZIONE CORRETTA
+//            am_u_tbeta(i) += am_u_tbeta_int_add(i);
+        //Salvo per passo successivo
+        am_err_v_old(i) = am_err_v(i);
+    }
+// CICLO FOR MESSO PER LASCIARE LA VARIABILE COSì DA NON DOVER MODIFICARE LA PARTE SOPRA, VA BENE?
+    for (int i = 0; i < 8; ++i) {
+        _am_u_tbeta.am_u_tbeta[i]=am_u_tbeta(i);
+        _am_u_tbeta.am_u_tbeta_int_add[i]=am_u_tbeta_int_add(i);
+    }
+    //Aggiorno uOrb csi, csi_dot, u_t_beta
+    if (_csi_pub != nullptr) {
+            orb_publish(ORB_ID(csi), _csi_pub, &_csi);
+        } else {
+            _csi_pub = orb_advertise(ORB_ID(csi), &_csi);
+        }
+    if (_csi_dot_pub != nullptr) {
+            orb_publish(ORB_ID(csi_dot), _csi_dot_pub, &_csi_dot);
+        } else {
+            _csi_dot_pub = orb_advertise(ORB_ID(csi_dot), &_csi_dot);
+        }
+    if (_am_u_tbeta_pub != nullptr) {
+                orb_publish(ORB_ID(am_u_tbeta), _am_u_tbeta_pub, &_am_u_tbeta);
+            } else {
+                _am_u_tbeta_pub = orb_advertise(ORB_ID(am_u_tbeta), &_am_u_tbeta);
+            }
+}
+/** MC* ....................*/
+
+/** RR* ....................*/
+
+void MulticopterPositionControl::compute_tautbeta()
+{
+/** Prende in ingresso: u_tbeta (risultato del P-PI), g,B,Bt_tb_i,Bb_tb_i,Bb_tb_i_pinv */
+
+/** Input: */
+    /** Da ORB */
+    matrix::Vector<float,10> am_g_eta;
+    matrix::Matrix<float,10,10> am_B_eta;
+
+    bool updated;
+        orb_check(_g_sub, &updated);
+        if (updated) {
+            orb_copy(ORB_ID(g_matrix), _g_sub, &_g_eta);
+        }
+        orb_check(_B_sub, &updated);
+                if (updated) {
+                    orb_copy(ORB_ID(B_matrix), _B_sub, &_B_eta);
+                }
+    for (int i = 0; i < 10; ++i) {
+        am_g_eta(i)=_g_eta.g[i];
+        for (int j = 0; j < 10; ++j) {
+            am_B_eta(i,j)=_B_eta.B[i+10*j];
+        }
+    }// DA VERIFICARE!!!
+
+/** Submatrices: */
+    matrix::Matrix<float,3,8> am_B_tz_tb;
+    matrix::Vector<float,3> am_g_tz;
+
+/** Create Submatrices: */
+    /** am_B_tz_tb */
+    int ii = 0;
+    int jj = 0;
+    for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 10; j++) {
+            if(i != 2 && i != 3 && j != 2 && j!= 3){
+                am_B_tz_tb(ii,jj) = am_B_eta(i,j);
+                ii++;
+                jj++;
+            }
+        }
+    }
+
+    /** am_g_tz; */
+    ii = 0;
+    for (int i = 0; i < 5; i++) {
+        if(i!=2 && i != 3 ){
+            am_g_tz(ii) = am_g_eta(i);
+            ii++;
+        }
+    }
+
+/** Calcola le Forze di riferimento Fx, e Fy (e Fz temporanea) con B, g e u. */
+    am_Fxyz = am_B_tz_tb*am_u_tbeta + am_g_tz;
+
+    /** CONTROLLO su thrust max */
+    // NON LO FACCIAMO PERCHE' LO FA LUI DOPO!
+
+    /** Saturation of Integral Action */
+        float am_thr_max = _params.thr_max;
+        /** Effect of tbeta_dot_ref */
+        matrix::Vector<float,3>am_Fxyz_int_add  = am_Fxyz + am_B_tz_tb*am_u_tbeta_int_add;
+
+        /** SATURA?*/
+        if (ControlToActControl_T*(am_Fxyz_int_add.norm())>am_thr_max){
+            am_saturation_utb_thrust_Fxyz = true;
+        }
+        else{
+            am_saturation_utb_thrust_Fxyz = false;
+        }
+
+}
+
+/** RR* ....................*/
 
 int mc_pos_control_main(int argc, char *argv[])
 {

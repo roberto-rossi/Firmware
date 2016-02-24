@@ -1,0 +1,6 @@
+bool am_saturation_utbZ_tau_quad		#
+bool am_saturation_utbZ_tau_robot		
+bool am_saturation_utbZ_thrust		
+bool am_saturation_utb_tau_quad
+bool am_saturation_utb_tau_robot
+bool am_saturation_utb_thrust

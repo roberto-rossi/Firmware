@@ -49,6 +49,7 @@
 #include <uORB/uORB.h>
 #include <uORB/topics/sensor_combined.h>
 #include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/polimi_attitude_ned.h>
 
 __EXPORT int px4_simple_app_main(int argc, char *argv[]);
 
@@ -64,6 +65,10 @@ int px4_simple_app_main(int argc, char *argv[])
 	struct vehicle_attitude_s att;
 	memset(&att, 0, sizeof(att));
 	orb_advert_t att_pub = orb_advertise(ORB_ID(vehicle_attitude), &att);
+
+    struct polimi_attitude_ned_s ned;
+    memset(&ned, 0, sizeof(ned));
+    orb_advert_t ned_pub = orb_advertise(ORB_ID(polimi_attitude_ned), &ned);
 
 	/* one could wait for multiple topics with this technique, just using one here */
 	px4_pollfd_struct_t fds[] = {
@@ -118,6 +123,11 @@ int px4_simple_app_main(int argc, char *argv[])
 			 */
 		}
 	}
+
+    ned.x = 5.0f;
+    ned.y = 1.0f;
+    ned.z = 4.0f;
+    orb_publish(ORB_ID(polimi_attitude_ned), ned_pub, &ned);
 
 	PX4_INFO("exiting");
 

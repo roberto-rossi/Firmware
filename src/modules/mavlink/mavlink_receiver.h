@@ -78,6 +78,7 @@
 //MODIFICA per invio delle matrici
 #include <uORB/topics/B_matrix.h>
 #include <uORB/topics/Bb_tb_i_matrix.h>
+#include <uORB/topics/Bt_tb_i_matrix.h>
 #include <uORB/topics/Bb_tb_i_pinv_matrix.h>
 #include <uORB/topics/T_bw_matrix.h>
 #include <uORB/topics/g_matrix.h>
@@ -151,6 +152,7 @@ private:
     void handle_message_B1_matrix(mavlink_message_t *msg);
     void handle_message_B2_matrix(mavlink_message_t *msg);
     void handle_message_Bb_tb_i_matrix(mavlink_message_t *msg);
+    void handle_message_Bt_tb_i_matrix(mavlink_message_t *msg);
     void handle_message_Bb_tb_i_pinv_matrix(mavlink_message_t *msg);
     void handle_message_T_bw_matrix(mavlink_message_t *msg);
     void handle_message_g_matrix(mavlink_message_t *msg);
@@ -221,6 +223,7 @@ private:
     orb_advert_t _B1_pub;
     orb_advert_t _B2_pub;
     orb_advert_t _Bb_tb_i_pub;
+    orb_advert_t _Bt_tb_i_pub;
     orb_advert_t _Bb_tb_i_pinv_pub;
     orb_advert_t _T_bw_pub;
     orb_advert_t _g_pub;

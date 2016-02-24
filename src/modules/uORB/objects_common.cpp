@@ -307,4 +307,13 @@ ORB_DEFINE(csi_dot, struct csi_dot_s);
 
 #include "topics/polimi_attitude_ned.h"
 ORB_DEFINE(polimi_attitude_ned, struct polimi_attitude_ned_s);
+
+#include "topics/am_flag.h"
+ORB_DEFINE(am_flag, struct am_flag_s);
+
+#include "topics/am_u_tbeta.h"
+ORB_DEFINE(am_u_tbeta, struct am_u_tbeta_s);
+
+#include "topics/Bt_tb_i_matrix.h"
+ORB_DEFINE(Bt_tb_i_matrix, struct Bt_tb_i_matrix_s);
 //FINE MODIFICA
