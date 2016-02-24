@@ -738,8 +738,8 @@ void MavlinkReceiver::handle_message_Bt_tb_i_matrix(mavlink_message_t *msg)
     f.timestamp = hrt_absolute_time();
 
     for(int i = 0; i < 8; i++) {
-        for(int j = 0; j < 6; j++) {
-            printf("%f ", (double)matrix.value[(i*6)+j]);
+        for(int j = 0; j < 2; j++) {
+            printf("%f ", (double)matrix.value[(i*2)+j]);
         }
         printf("\n");
     }

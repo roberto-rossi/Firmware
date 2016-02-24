@@ -66,6 +66,7 @@
 #include "topics/polimi_attitude_ned.h"
 #include "topics/am_flag.h"
 #include "topics/am_u_tbeta.h"
+#include "topics/am_tau.h"
 //FINE MODIFICA
 
 #include <px4_defines.h>
@@ -152,6 +153,7 @@ template class __EXPORT Publication<csi_dot_s>;
 template class __EXPORT Publication<polimi_attitude_ned_s>;
 template class __EXPORT Publication<am_flag_s>;
 template class __EXPORT Publication<am_u_tbeta_s>;
+template class __EXPORT Publication<am_tau_s>;
 //FINE MODIFICA
 
 }

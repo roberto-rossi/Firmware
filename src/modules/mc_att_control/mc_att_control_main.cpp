@@ -90,6 +90,7 @@
 #include <uORB/topics/Bb_tb_i_pinv_matrix.h>
 #include <uORB/topics/am_u_tbeta.h>
 #include <uORB/topics/am_flag.h>
+#include <uORB/topics/am_tau.h>
     /** MC* ...........*/
 #include <systemlib/param/param.h>
 #include <systemlib/err.h>
@@ -160,6 +161,7 @@ private:
     int     _am_u_tbeta_sub;
 
     orb_advert_t    _am_flag_pub;
+    orb_advert_t    _am_tau_pub;
 
     struct g_matrix_s               _g_eta;
     struct B_matrix_s               _B_eta;
@@ -169,6 +171,7 @@ private:
     struct Bb_tb_i_pinv_matrix_s    _Bb_tb_i_pinv;
     struct am_u_tbeta_s             _am_u_tbeta;
     struct am_flag_s                _am_flag;
+    struct am_tau_s                 _am_tau;
 
     /** MC* ...........*/
 
@@ -384,6 +387,7 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
     _am_u_tbeta_sub(-1),
 
     _am_flag_pub(nullptr),
+    _am_tau_pub(nullptr),
 
     /** MC* ...........*/
 
@@ -423,6 +427,7 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	memset(&_Bb_tb_i_pinv, 0, sizeof(_Bb_tb_i_pinv));
 	memset(&_am_u_tbeta, 0, sizeof(_am_u_tbeta));
 	memset(&_am_flag, 0, sizeof(_am_flag));
+	memset(&_am_tau, 0, sizeof(_am_tau));
     /** MC* ...........*/
 
 	_params.att_p.zero();
@@ -1283,10 +1288,19 @@ MulticopterAttitudeControl::compute_final_torques()
                 _am_flag.am_saturation_utb_tau_robot = am_saturation_utb_tau_robot;
                 _am_flag.am_saturation_utb_thrust = am_saturation_utb_thrust;
 
+                for (int i = 0; i < 4; ++i) {
+                    _am_tau.tau_robot[i]=am_tau_robot(i);
+                }
+
                 if (_am_flag_pub != nullptr) {
                         orb_publish(ORB_ID(am_flag), _am_flag_pub, &_am_flag);
                     } else {
                         _am_flag_pub = orb_advertise(ORB_ID(am_flag), &_am_flag);
+                    }
+                if (_am_tau_pub != nullptr) {
+                        orb_publish(ORB_ID(am_tau), _am_tau_pub, &_am_tau);
+                    } else {
+                        _am_tau_pub = orb_advertise(ORB_ID(am_tau), &_am_tau);
                     }
 }
 

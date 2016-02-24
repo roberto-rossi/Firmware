@@ -277,7 +277,7 @@ ORB_DEFINE(vehicle_command_ack, struct vehicle_command_ack_s);
 #include "topics/ekf2_innovations.h"
 ORB_DEFINE(ekf2_innovations, struct ekf2_innovations_s);
 
-//MODIFICA per invio delle matrici
+//MODIFICA
 #include "topics/B_matrix.h"
 ORB_DEFINE(B_matrix, struct B_matrix_s);
 
@@ -316,4 +316,7 @@ ORB_DEFINE(am_u_tbeta, struct am_u_tbeta_s);
 
 #include "topics/Bt_tb_i_matrix.h"
 ORB_DEFINE(Bt_tb_i_matrix, struct Bt_tb_i_matrix_s);
+
+#include "topics/am_tau.h"
+ORB_DEFINE(am_tau, struct am_tau_s);
 //FINE MODIFICA
