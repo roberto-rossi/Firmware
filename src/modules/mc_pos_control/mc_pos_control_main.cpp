@@ -89,6 +89,7 @@
 #include <uORB/topics/B_matrix.h>
 #include <uORB/topics/am_flag.h>
 #include <uORB/topics/am_u_tbeta.h>
+#include <uORB/topics/T_bw_matrix.h>
 /** MC* ...........*/
 
 #include <systemlib/systemlib.h>
@@ -161,6 +162,7 @@ private:
     int     _g_sub;
     int     _B_sub;
     int     _am_flag_sub;
+    int     _T_bw_sub;
 
     orb_advert_t    _csi_pub;
     orb_advert_t    _csi_dot_pub;
@@ -177,14 +179,24 @@ private:
     struct B_matrix_s             _B_eta;
     struct am_flag_s              _am_flag;
     struct am_u_tbeta_s           _am_u_tbeta;
+    struct T_bw_matrix_s           _T_bw;
 
     matrix::Vector<float,8> am_u_tbeta_int;
-    matrix::Vector<float,8> am_err_p;
     matrix::Vector<float,8> am_err_v;
-    matrix::Vector<float,8> am_err_v_old;
-    matrix::Vector<float,8> Kpp;
-    matrix::Vector<float,8> Kpv;
-    matrix::Vector<float,8> Kiv;
+
+    float Kpp;
+    float Kpv;
+    float Kiv;
+
+    matrix::Matrix<float,2,2> Ryaw_T;
+    matrix::Matrix<float,8,10> T_reduced;
+    matrix::Vector<float,10> am_csi;
+    matrix::Vector<float,10> am_csi_dot;
+    matrix::Vector<float,10> am_csi_r;
+    matrix::Vector<float,10> am_csi_r_dot;
+    matrix::Vector<float,8> am_eta;
+    matrix::Vector<float,8> am_eta_r_fb;
+    matrix::Vector<float,8> am_eta_r_ff;
 
     hrt_abstime Ts_prev;
     /** MC* ...........*/
@@ -434,6 +446,7 @@ MulticopterPositionControl::MulticopterPositionControl() :
     _g_sub(-1),
     _B_sub(-1),
     _am_flag_sub(-1),
+    _T_bw_sub(-1),
 
     _csi_pub(nullptr),
     _csi_dot_pub(nullptr),
@@ -495,6 +508,7 @@ MulticopterPositionControl::MulticopterPositionControl() :
     memset(&_B_eta, 0, sizeof(_B_eta));
     memset(&_am_flag, 0, sizeof(_am_flag));
     memset(&_am_u_tbeta, 0, sizeof(_am_u_tbeta));
+	memset(&_T_bw, 0, sizeof(_T_bw));
     /** MC* ...............*/
 
 	_params.pos_p.zero();
@@ -2073,6 +2087,10 @@ void MulticopterPositionControl::compute_utbeta()
         if (updated) {
             orb_copy(ORB_ID(csi_dot_r), _csi_r_dot_sub, &_csi_r_dot);
         }
+    orb_check(_T_bw_sub, &updated);
+            if (updated) {
+                orb_copy(ORB_ID(T_bw_matrix), _T_bw_sub, &_T_bw);
+            }
     //Copia valori di attitude nella variabile csi
         //LOCAL PRESO CON IL VALORE DIRETTO DA UORB O CONTROLLATO?
     _csi.csi[0]=_local_pos.x;
@@ -2091,26 +2109,77 @@ void MulticopterPositionControl::compute_utbeta()
     hrt_abstime t = hrt_absolute_time();
     float Ts = Ts_prev != 0 ? (t - Ts_prev) * 0.000001f : 0.0f;
     Ts_prev = t;
-    //Calcolo u_tbeta (Incrociato perchè non calcolato per roll e pitch)
-    int k;
-    for (int i = 0; i < 8; ++i) {
-        k = i;
-        if (i>2)
-            k = i + 2;
-        //Calcolo errore di posizione
-        am_err_p(i)=_csi_r.csi_r[k] - _csi.csi[k];
-        //Calcolo errore velocità + FeedForward
-        const float Fv = 0.3;
-        am_err_v(i) = am_err_p(i)*Kpp(i) + _csi_r_dot.csi_r_dot[k]*Fv - _csi_dot.csi_dot[k];
-        //Calcolo coppia proporzionale
-        am_u_tbeta(i) = am_err_v(i)*Kpv(i) + am_u_tbeta_int(i); //VETTORI INIZIALIZZATI A 0?
-        //Calcolo coppia integrale
-        am_u_tbeta_int_add(i) = am_err_v(i)*Kiv(i)*Ts; //CONTROLLARE CALCOLO TS
-//        if (true) //SCRIVERE CONDIZIONE CORRETTA
-//            am_u_tbeta(i) += am_u_tbeta_int_add(i);
-        //Salvo per passo successivo
-        am_err_v_old(i) = am_err_v(i);
+
+    matrix::Matrix<float,6,2> am_T_betaw; am_T_betaw.setZero();
+
+    for (int i = 0; i < 6; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            am_T_betaw(i,j)=_T_bw.T_bw[i+6*j];
+        }
     }
+    float yaw_act = _csi.csi[5];
+    float syaw = sin(yaw_act);
+    float cyaw = cos(yaw_act);
+
+
+    Ryaw_T(0,0) = cyaw;Ryaw_T(0,1) = syaw;Ryaw_T(1,0) = -syaw;Ryaw_T(1,1) = cyaw;
+    T_reduced.setZero();
+    for (int i = 0; i < 8; ++i) {
+        for (int j = 0; j < 10; ++j) {
+            if (i<2 && j<2){
+                T_reduced(i,j)=Ryaw_T(i,j);
+            }
+            else if (i>1 && j>1){
+                if(j==3 || j == 4){
+                    T_reduced(i,j)=am_T_betaw(i-2,j-3);
+                }
+                else if (i == j-2){
+                    T_reduced(i,j) = 1.0;
+                }
+            }
+        }
+    }
+
+    //Calcolo u_tbeta (Incrociato perchè non calcolato per roll e pitch)
+    for (int i = 0; i < 10; ++i) {
+        am_csi(i) = _csi.csi[i];
+        am_csi_dot(i)=_csi_dot.csi_dot[i];
+        am_csi_r(i) = _csi_r.csi_r[i];
+        am_csi_r_dot(i)=_csi_r_dot.csi_r_dot[i];
+
+    }
+        am_csi_r(3) = 0.0;
+        am_csi_r(4) = 0.0;
+        am_csi_r_dot(3) = 0.0;
+        am_csi_r_dot(4) = 0.0;
+
+    am_eta_r_fb     = (T_reduced*(am_csi_r - am_csi))*Kpp;
+    am_eta          = T_reduced*am_csi_dot;
+    am_eta_r_ff     = T_reduced*am_csi_r_dot;
+
+    //Calcolo errore velocità + FeedForward
+    const float Fv = 0.3;
+    am_err_v = am_eta_r_fb + am_eta_r_ff*Fv - am_eta;
+    //Calcolo coppia proporzionale
+    am_u_tbeta = am_err_v*Kpv + am_u_tbeta_int; //VETTORI INIZIALIZZATI A 0?
+    //Calcolo coppia integrale
+    am_u_tbeta_int_add = am_err_v*Kiv*Ts; //CONTROLLARE CALCOLO TS
+
+
+//    for (int i = 0; i < 8; ++i) {
+//        //Calcolo errore velocità + FeedForward
+//        const float Fv = 0.3;
+//        am_err_v(i) = am_err_p(i)*Kpp(i) + _am_csi_r_dot_eta(i)*Fv -am_csi_dot_eta(i);
+//        //Calcolo coppia proporzionale
+//        am_u_tbeta(i) = am_err_v(i)*Kpv(i) + am_u_tbeta_int(i); //VETTORI INIZIALIZZATI A 0?
+//        //Calcolo coppia integrale
+//        am_u_tbeta_int_add(i) = am_err_v(i)*Kiv(i)*Ts; //CONTROLLARE CALCOLO TS
+////        if (true) //SCRIVERE CONDIZIONE CORRETTA
+////            am_u_tbeta(i) += am_u_tbeta_int_add(i);
+//        //Salvo per passo successivo
+//        am_err_v_old(i) = am_err_v(i);
+//    }
+
 // CICLO FOR MESSO PER LASCIARE LA VARIABILE COSì DA NON DOVER MODIFICARE LA PARTE SOPRA, VA BENE?
     for (int i = 0; i < 8; ++i) {
         _am_u_tbeta.am_u_tbeta[i]=am_u_tbeta(i);
