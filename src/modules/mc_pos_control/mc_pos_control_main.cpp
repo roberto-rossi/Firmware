@@ -184,9 +184,9 @@ private:
     matrix::Vector<float,8> am_u_tbeta_int;
     matrix::Vector<float,8> am_err_v;
 
-    float Kpp;
-    float Kpv;
-    float Kiv;
+    float Kpp = 0.5;
+    float Kpv = 5;
+    float Kiv = 0;
 
     matrix::Matrix<float,2,2> Ryaw_T;
     matrix::Matrix<float,8,10> T_reduced;
@@ -320,6 +320,13 @@ private:
     matrix::Vector<float,8> am_u_tbeta_int_add;
         /** Output: */
     matrix::Vector<float,3> am_Fxyz;
+    matrix::Vector<float,3>am_Fxyz_int_add;
+    /** Matrices: */
+    matrix::Vector<float,10> am_g_eta;
+    matrix::Matrix<float,10,10> am_B_eta;
+    /** Submatrices: */
+        matrix::Matrix<float,3,8> am_B_tz_tb;
+        matrix::Vector<float,3> am_g_tz;
 
     float ControlToActControl_T;// b = zeros(4,1);
     float Mass_quadrotor; // no battery
@@ -952,7 +959,9 @@ MulticopterPositionControl::control_manual(float dt)
 void
 MulticopterPositionControl::control_offboard(float dt)
 {
-	bool updated;
+    mavlink_log_info(_mavlink_fd, "[giulio] control_offboard");
+
+    bool updated;
 	orb_check(_pos_sp_triplet_sub, &updated);
 
 	if (updated) {
@@ -1245,6 +1254,10 @@ MulticopterPositionControl::task_main()
     _csi_r_sub = orb_subscribe(ORB_ID(csi_r));
     _csi_r_dot_sub = orb_subscribe(ORB_ID(csi_dot_r));
     _am_flag_sub = orb_subscribe(ORB_ID(am_flag));
+    _T_bw_sub = orb_subscribe(ORB_ID(T_bw_matrix));
+    _g_sub = orb_subscribe(ORB_ID(g_matrix));
+    _B_sub = orb_subscribe(ORB_ID(B_matrix));
+
     Ts_prev = 0;
     /** MC* ...........*/
 
@@ -1276,12 +1289,13 @@ MulticopterPositionControl::task_main()
 	fds[0].events = POLLIN;
 
 	while (!_task_should_exit) {
-		/* wait for up to 500ms for data */
+	    /* wait for up to 500ms for data */
 		int pret = px4_poll(&fds[0], (sizeof(fds) / sizeof(fds[0])), 500);
 
 		/* timed out - periodic check for _task_should_exit */
 		if (pret == 0) {
-			continue;
+		    printf("pret == 0 \n");
+		    continue;
 		}
 
 		/* this is undesirable but not much we can do */
@@ -1356,8 +1370,7 @@ MulticopterPositionControl::task_main()
 		    _control_mode.flag_control_position_enabled ||
 		    _control_mode.flag_control_climb_rate_enabled ||
 		    _control_mode.flag_control_velocity_enabled) {
-
-			_vel_ff.zero();
+		    _vel_ff.zero();
 
 			/* by default, run position/altitude controller. the control_* functions
 			 * can disable this and run velocity controllers directly in this cycle */
@@ -1382,7 +1395,7 @@ MulticopterPositionControl::task_main()
 
 			} else if (_control_mode.flag_control_offboard_enabled) {
 				/* offboard control */
-				control_offboard(dt);
+			    control_offboard(dt);
 				_mode_auto = false;
 
 			} else {
@@ -1565,7 +1578,7 @@ MulticopterPositionControl::task_main()
 				}
 
 				if (_control_mode.flag_control_climb_rate_enabled || _control_mode.flag_control_velocity_enabled) {
-					/* reset integrals if needed */
+				    /* reset integrals if needed */
 					if (_control_mode.flag_control_climb_rate_enabled) {
 						if (reset_int_z) {
 							reset_int_z = false;
@@ -1607,17 +1620,15 @@ MulticopterPositionControl::task_main()
 					// TODO?: + _vel_sp.emult(_params.vel_ff)
 
 					/** RR* ............. */
-					compute_utbeta();
-
 					math::Vector<3> thrust_sp;
 
-				    bool updated;
-				    orb_check(_am_flag_sub, &updated);
-				    if (updated) {
-				        orb_copy(ORB_ID(am_flag), _am_flag_sub, &_am_flag);
-				    }
-
-                    if (_control_mode.flag_control_offboard_enabled){
+					if (_control_mode.flag_control_offboard_enabled){
+                        compute_utbeta();
+                        bool updated;
+                        orb_check(_am_flag_sub, &updated);
+                        if (updated) {
+                            orb_copy(ORB_ID(am_flag), _am_flag_sub, &_am_flag);
+                        }
                         compute_tautbeta();
                         for (int i = 0; i < 3; i++) {
                              thrust_sp(i) = ControlToActControl_T*am_Fxyz(i);
@@ -2072,25 +2083,25 @@ void MulticopterPositionControl::compute_utbeta()
         orb_copy(ORB_ID(vehicle_attitude), _attitude_sub, &_vehicle_attitude);
     }
     orb_check(_csi_sub, &updated);
-        if (updated) {
-            orb_copy(ORB_ID(csi), _csi_sub, &_csi);
-        }
+    if (updated) {
+        orb_copy(ORB_ID(csi), _csi_sub, &_csi);
+    }
     orb_check(_csi_r_sub, &updated);
-        if (updated) {
-            orb_copy(ORB_ID(csi_r), _csi_r_sub, &_csi_r);
-        }
+    if (updated) {
+        orb_copy(ORB_ID(csi_r), _csi_r_sub, &_csi_r);
+    }
     orb_check(_csi_dot_sub, &updated);
-        if (updated) {
-            orb_copy(ORB_ID(csi_dot), _csi_dot_sub, &_csi_dot);
-        }
+    if (updated) {
+        orb_copy(ORB_ID(csi_dot), _csi_dot_sub, &_csi_dot);
+    }
     orb_check(_csi_r_dot_sub, &updated);
-        if (updated) {
-            orb_copy(ORB_ID(csi_dot_r), _csi_r_dot_sub, &_csi_r_dot);
-        }
+    if (updated) {
+        orb_copy(ORB_ID(csi_dot_r), _csi_r_dot_sub, &_csi_r_dot);
+    }
     orb_check(_T_bw_sub, &updated);
-            if (updated) {
-                orb_copy(ORB_ID(T_bw_matrix), _T_bw_sub, &_T_bw);
-            }
+    if (updated) {
+        orb_copy(ORB_ID(T_bw_matrix), _T_bw_sub, &_T_bw);
+    }
     //Copia valori di attitude nella variabile csi
         //LOCAL PRESO CON IL VALORE DIRETTO DA UORB O CONTROLLATO?
     _csi.csi[0]=_local_pos.x;
@@ -2106,6 +2117,18 @@ void MulticopterPositionControl::compute_utbeta()
     _csi_dot.csi_dot[4]=_vehicle_attitude.pitchspeed;
     _csi_dot.csi_dot[5]=_vehicle_attitude.yawspeed;
 
+//    printf("csi_r: \n");
+//    for (size_t j = 0; j < 11; j++) {
+//        printf(" %f ", (double)_csi_r.csi_r[j]);
+//    }
+//    printf("\n");
+//
+//    printf("csi_r_dot: \n");
+//    for (size_t j = 0; j < 11; j++) {
+//        printf(" %f ", (double)_csi_r_dot.csi_r_dot[j]);
+//    }
+//    printf("\n");
+
     hrt_abstime t = hrt_absolute_time();
     float Ts = Ts_prev != 0 ? (t - Ts_prev) * 0.000001f : 0.0f;
     Ts_prev = t;
@@ -2117,6 +2140,17 @@ void MulticopterPositionControl::compute_utbeta()
             am_T_betaw(i,j)=_T_bw.T_bw[i+6*j];
         }
     }
+
+//    //Print T_bw
+//    printf("T_bw (pos control): \n");
+//    for (size_t i = 0; i < 6; i++) {
+//        for (size_t j = 0; j < 2; j++) {
+//            printf(" %f ", (double)am_T_betaw(i, j));
+//        }
+//        printf("\n");
+//    }
+//    printf("\n");
+
     float yaw_act = _csi.csi[5];
     float syaw = sin(yaw_act);
     float cyaw = cos(yaw_act);
@@ -2181,10 +2215,13 @@ void MulticopterPositionControl::compute_utbeta()
 //    }
 
 // CICLO FOR MESSO PER LASCIARE LA VARIABILE COSì DA NON DOVER MODIFICARE LA PARTE SOPRA, VA BENE?
+//    printf("u_tbeta: ");
     for (int i = 0; i < 8; ++i) {
         _am_u_tbeta.am_u_tbeta[i]=am_u_tbeta(i);
         _am_u_tbeta.am_u_tbeta_int_add[i]=am_u_tbeta_int_add(i);
+//        printf("%f ",(double)_am_u_tbeta.am_u_tbeta[i]);
     }
+//    printf("\n");
     //Aggiorno uOrb csi, csi_dot, u_t_beta
     if (_csi_pub != nullptr) {
             orb_publish(ORB_ID(csi), _csi_pub, &_csi);
@@ -2201,6 +2238,7 @@ void MulticopterPositionControl::compute_utbeta()
             } else {
                 _am_u_tbeta_pub = orb_advertise(ORB_ID(am_u_tbeta), &_am_u_tbeta);
             }
+return;
 }
 /** MC* ....................*/
 
@@ -2212,28 +2250,22 @@ void MulticopterPositionControl::compute_tautbeta()
 
 /** Input: */
     /** Da ORB */
-    matrix::Vector<float,10> am_g_eta;
-    matrix::Matrix<float,10,10> am_B_eta;
-
     bool updated;
-        orb_check(_g_sub, &updated);
-        if (updated) {
-            orb_copy(ORB_ID(g_matrix), _g_sub, &_g_eta);
-        }
-        orb_check(_B_sub, &updated);
-                if (updated) {
-                    orb_copy(ORB_ID(B_matrix), _B_sub, &_B_eta);
-                }
+    orb_check(_g_sub, &updated);
+    if (updated) {
+        orb_copy(ORB_ID(g_matrix), _g_sub, &_g_eta);
+    }
+    orb_check(_B_sub, &updated);
+    if (updated) {
+        orb_copy(ORB_ID(B_matrix), _B_sub, &_B_eta);
+    }
+
     for (int i = 0; i < 10; ++i) {
         am_g_eta(i)=_g_eta.g[i];
         for (int j = 0; j < 10; ++j) {
             am_B_eta(i,j)=_B_eta.B[i+10*j];
         }
     }// DA VERIFICARE!!!
-
-/** Submatrices: */
-    matrix::Matrix<float,3,8> am_B_tz_tb;
-    matrix::Vector<float,3> am_g_tz;
 
 /** Create Submatrices: */
     /** am_B_tz_tb */
@@ -2261,14 +2293,19 @@ void MulticopterPositionControl::compute_tautbeta()
 /** Calcola le Forze di riferimento Fx, e Fy (e Fz temporanea) con B, g e u. */
     am_Fxyz = am_B_tz_tb*am_u_tbeta + am_g_tz;
 
+//    printf("am_Fxyz:");
+//    for (size_t j = 0; j < 3; j++) {
+//        printf(" %f ", (double)am_Fxyz(j));
+//    }
+//    printf("\n");
+
     /** CONTROLLO su thrust max */
     // NON LO FACCIAMO PERCHE' LO FA LUI DOPO!
 
     /** Saturation of Integral Action */
         float am_thr_max = _params.thr_max;
         /** Effect of tbeta_dot_ref */
-        matrix::Vector<float,3>am_Fxyz_int_add  = am_Fxyz + am_B_tz_tb*am_u_tbeta_int_add;
-
+        am_Fxyz_int_add  = am_Fxyz + am_B_tz_tb*am_u_tbeta_int_add;
         /** SATURA?*/
         if (ControlToActControl_T*(am_Fxyz_int_add.norm())>am_thr_max){
             am_saturation_utb_thrust_Fxyz = true;
@@ -2276,7 +2313,7 @@ void MulticopterPositionControl::compute_tautbeta()
         else{
             am_saturation_utb_thrust_Fxyz = false;
         }
-
+    return;
 }
 
 /** RR* ....................*/

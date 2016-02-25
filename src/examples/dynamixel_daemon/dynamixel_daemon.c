@@ -196,7 +196,7 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     res = dxl_initialize(1,9);
     printf("Initialization result: %d \n",res);
     //SyncWrite Initialization
-    int NUM_ACTUATOR = 4;
+    int NUM_ACTUATOR = 5;
     int i;
     int id[5];
     for( i=0; i<NUM_ACTUATOR; i++ )
