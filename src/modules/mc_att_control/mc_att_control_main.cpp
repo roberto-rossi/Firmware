@@ -488,8 +488,10 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_att_control.zero();
 	/** RR .........*/
     am_att_control_acc_i.setZero();
-    ControlToActControl_T = 1.92e-02;
-    ControlToActControl_tau(0) = 6.53e-02; ControlToActControl_tau(1) = 1.624e-01; ControlToActControl_tau(2) = 5.376e-01;
+    ControlToActControl_T = 0.0192f;
+    ControlToActControl_tau(0) = 0.0653f;
+    ControlToActControl_tau(1) = 0.1624f;
+    ControlToActControl_tau(2) = 0.5376f;
     /** RR .........*/
 
 	_I.identity();
@@ -895,8 +897,8 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
     matrix::Vector<float,2> am_omega_xy_dot_ref_int_add; am_omega_xy_dot_ref_int_add(0) = _att_control_acc_i_add(0);am_omega_xy_dot_ref_int_add(1) = _att_control_acc_i_add(1);
 
-    am_omega_xy_dot_ref(0) = am_att_control_acc_pd(0) + am_att_control_acc_i(0);
-    am_omega_xy_dot_ref(1) = am_att_control_acc_pd(1) + am_att_control_acc_i(1);
+    am_omega_xy_dot_ref(0) = am_att_control_acc_pd(0)/100 ; //+ am_att_control_acc_i(0);
+    am_omega_xy_dot_ref(1) = am_att_control_acc_pd(1)/100 ; //+ am_att_control_acc_i(1);
 
     if (_v_control_mode.flag_control_offboard_enabled){
         /** Calcola coppie finali e saturazioni*/
@@ -906,9 +908,66 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
                     _att_control(i) = am_tau_quad(i);
             }
             //am_thrust = am_thrust;
+
+            printf("rates_err: \n");
+            for (size_t i = 0; i < 3; i++) {
+                printf(" %-2.4g ", (double)rates_err(i));
+            }
+            printf("\n");
+
+
+            printf("u_tbeta (att_control): \n");
+            for (size_t i = 0; i < 8; i++) {
+                printf(" %-2.4g ", (double)am_u_tbeta(i));
+            }
+            printf("\n");
+
+            printf("T_bw: \n");
+            for (size_t i = 0; i < 6; i++) {
+                for (size_t j = 0; j < 2; j++) {
+                    printf(" %-2.4g ", (double)am_T_betaw(i, j));
+                }
+                printf("\n");
+            }
+            printf("\n");
+
+            printf("tau_beta: \n");
+            for (size_t j = 0; j < 6; j++) {
+                printf(" %-2.4g ", (double)am_tau_beta(j));
+            }
+            printf("\n");
+
+            printf("g beta = \n");
+            for (int j = 0; j < 6; j++) {
+                printf(" %-2.4g ", (double)am_g_beta(j));
+            }
+            printf("\n");
+
+            printf("tau beta in = \n");
+            for (int j = 0; j < 6; j++) {
+                printf(" %-2.4g ", (double)am_tau_beta_in(j));
+            }
+            printf("\n");
+
+            printf("B_betaw: \n");
+            for (size_t i = 0; i < 6; i++) {
+                for (size_t j = 0; j < 2; j++) {
+                    printf(" %-2.4g ", (double)am_B_betaw(i, j));
+                }
+                printf("\n");
+            }
+            printf("\n");
+
+            printf("omega_xy: \n");
+            for (size_t j = 0; j < 2; j++) {
+                printf(" %-2.4g ", (double)am_omega_xy_dot_ref(j));
+            }
+            printf("\n");
+
+
             _thrust_sp = am_thrust;
             //am_tau_robot = am_tau_robot;
-            printf("thrust = %-2.4g quad = %-2.4g %-2.4g %-2.4g robot = %-2.4g %-2.4g %-2.4g %-2.4g \n",(double)am_thrust,(double)am_tau_quad(0),(double)am_tau_quad(1),(double)am_tau_quad(2),(double)am_tau_robot(0),(double)am_tau_robot(1),(double)am_tau_robot(2),(double)am_tau_robot(3));
+            //printf("thrust = %-2.4g quad = %-2.4g %-2.4g %-2.4g robot = %-2.4g %-2.4g %-2.4g %-2.4g \n",(double)am_thrust,(double)am_tau_quad(0),(double)am_tau_quad(1),(double)am_tau_quad(2),(double)am_tau_robot(0),(double)am_tau_robot(1),(double)am_tau_robot(2),(double)am_tau_robot(3));
         /** Aggiorna Integrali*/
             if (fabsf(am_thrust) > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
                 if (!am_saturation_omega_tau_quad && !am_saturation_omega_tau_robot && !am_saturation_omega_thrust){
@@ -982,6 +1041,14 @@ MulticopterAttitudeControl::compute_final_torques()
     orb_check(_B_eta_sub, &updated);
             if (updated) {
                 orb_copy(ORB_ID(B_matrix), _B_eta_sub, &_B_eta);
+//                printf("B_eta: \n");
+//                for (size_t i = 0; i < 10; i++) {
+//                    for (size_t j = 0; j < 10; j++) {
+//                        printf(" %-2.4g ", (double)_B_eta.B[i + 10*j]);
+//                    }
+//                    printf("\n");
+//                }
+//                printf("\n");
             }
     orb_check(_T_bw_sub, &updated);
             if (updated) {
@@ -1010,15 +1077,6 @@ MulticopterAttitudeControl::compute_final_torques()
 //    printf("g_eta (att_control): \n");
 //    for (size_t i = 0; i < 10; i++) {
 //        printf(" %-2.4g ", (double)am_g_eta(i));
-//    }
-//    printf("\n");
-
-//    printf("B_eta: \n");
-//    for (size_t i = 0; i < 10; i++) {
-//        for (size_t j = 0; j < 10; j++) {
-//            printf(" %-2.4g ", (double)am_B_eta(i, j));
-//        }
-//        printf("\n");
 //    }
 //    printf("\n");
 
@@ -1153,7 +1211,7 @@ MulticopterAttitudeControl::compute_final_torques()
     am_beta_dot_ref = am_Bb_tb_i.transpose()*am_effec_tau;
 
     /** Tau_beta = tau_b_inertia + (C_betav + g_beta) + (B_betaw * omega_dot_ref) */
-    am_tau_beta = am_g_beta + am_tau_beta_in + am_B_betaw*am_omega_xy_dot_ref;
+    am_tau_beta = am_g_beta + am_tau_beta_in; // + am_B_betaw*am_omega_xy_dot_ref;
 
 //    printf("tau_beta: \n");
 //    for (size_t j = 0; j < 6; j++) {
@@ -1161,17 +1219,17 @@ MulticopterAttitudeControl::compute_final_torques()
 //    }
 //    printf("\n");
 //
-    printf("g_beta: \n");
-    for (int j = 0; j < 6; j++) {
-        printf(" %f ", (double)am_g_beta(j));
-    }
-    printf("\n");
+//    printf("g beta = \n");
+//    for (int j = 0; j < 6; j++) {
+//        printf(" %-2.4g ", (double)am_g_beta(j));
+//    }
+//    printf("\n");
 //
-    printf("tau_beta_in: \n");
-    for (int j = 0; j < 6; j++) {
-        printf(" %f ", (double)am_tau_beta_in(j));
-    }
-    printf("\n");
+//    printf("tau beta in = \n");
+//    for (int j = 0; j < 6; j++) {
+//        printf(" %-2.4g ", (double)am_tau_beta_in(j));
+//    }
+//    printf("\n");
 //
 //    printf("B_betaw: \n");
 //    for (size_t i = 0; i < 6; i++) {
@@ -1183,7 +1241,7 @@ MulticopterAttitudeControl::compute_final_torques()
 //    printf("\n");
 //
 //    printf("omega_xy: \n");
-//    for (size_t j = 0; j < 6; j++) {
+//    for (size_t j = 0; j < 2; j++) {
 //        printf(" %-2.4g ", (double)am_omega_xy_dot_ref(j));
 //    }
 //    printf("\n");
@@ -1199,7 +1257,7 @@ MulticopterAttitudeControl::compute_final_torques()
     const float am_thr_max = 0.9; // CONTROLLA!!!!!
     const float am_thr_min = 0.1; // CONTROLLA!!!!!
     const float am_tau_quad_max = 0.3;
-    const float am_tau_robot_max = 100; //!!!
+    const float am_tau_robot_max = 0.5; //!!!
 
     /** Restituisce Thrust*/
     am_thrust = ControlToActControl_T*am_tau_beta(0);

@@ -184,9 +184,9 @@ private:
     matrix::Vector<float,8> am_u_tbeta_int;
     matrix::Vector<float,8> am_err_v;
 
-    float Kpp = 0.5;
-    float Kpv = 5;
-    float Kiv = 0;
+    float Kpp = 0.1f;
+    float Kpv = 1.0f;
+    float Kiv = 0.1f;
 
     matrix::Matrix<float,2,2> Ryaw_T;
     matrix::Matrix<float,8,10> T_reduced;
@@ -322,8 +322,8 @@ private:
     matrix::Vector<float,3> am_Fxyz;
     matrix::Vector<float,3>am_Fxyz_int_add;
     /** Matrices: */
-    matrix::Vector<float,10> am_g_eta;
-    matrix::Matrix<float,10,10> am_B_eta;
+//    matrix::Vector<float,10> am_g_eta;
+//    matrix::Matrix<float,10,10> am_B_eta;
     /** Submatrices: */
         matrix::Matrix<float,3,8> am_B_tz_tb;
         matrix::Vector<float,3> am_g_tz;
@@ -572,8 +572,8 @@ MulticopterPositionControl::MulticopterPositionControl() :
 
 
     /** RR* ....................*/
-    ControlToActControl_T = 1.92e-02;// b = zeros(4,1);
-    Mass_quadrotor = 2.4259; // no battery
+    ControlToActControl_T = 0.0192f;// b = zeros(4,1);
+    Mass_quadrotor = 2.4259f; // no battery
     /** RR* ....................*/
 }
 
@@ -959,8 +959,7 @@ MulticopterPositionControl::control_manual(float dt)
 void
 MulticopterPositionControl::control_offboard(float dt)
 {
-    mavlink_log_info(_mavlink_fd, "[giulio] control_offboard");
-
+    //mavlink_log_info(_mavlink_fd, "[giulio] control_offboard");
     bool updated;
 	orb_check(_pos_sp_triplet_sub, &updated);
 
@@ -1647,8 +1646,8 @@ MulticopterPositionControl::task_main()
                         //math::Vector<3> AM_Thrust = vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) + thrust_int;
                     }
 
-
                    	/** RR* ............. */
+
 
 					if (_pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_TAKEOFF
 							&& !_takeoff_jumped && !_control_mode.flag_control_manual_enabled) {
@@ -2104,18 +2103,18 @@ void MulticopterPositionControl::compute_utbeta()
     }
     //Copia valori di attitude nella variabile csi
         //LOCAL PRESO CON IL VALORE DIRETTO DA UORB O CONTROLLATO?
-    _csi.csi[0]=_local_pos.x;
-    _csi.csi[1]=_local_pos.y;
-    _csi.csi[2]=_local_pos.z;
+    _csi.csi[0]=0.0f; //_local_pos.x;
+    _csi.csi[1]=0.0f; //_local_pos.y;
+    _csi.csi[2]=0.0f; //_local_pos.z;
     _csi.csi[3]=_vehicle_attitude.roll;
     _csi.csi[4]=_vehicle_attitude.pitch;
-    _csi.csi[5]=_vehicle_attitude.yaw;
-    _csi_dot.csi_dot[0]=_local_pos.vx;
-    _csi_dot.csi_dot[1]=_local_pos.vy;
-    _csi_dot.csi_dot[2]=_local_pos.vz;
+    _csi.csi[5]=0.0f; //_vehicle_attitude.yaw;
+    _csi_dot.csi_dot[0]=0.0f; //_local_pos.vx;
+    _csi_dot.csi_dot[1]=0.0f; //_local_pos.vy;
+    _csi_dot.csi_dot[2]=0.0f; //_local_pos.vz;
     _csi_dot.csi_dot[3]=_vehicle_attitude.rollspeed;
     _csi_dot.csi_dot[4]=_vehicle_attitude.pitchspeed;
-    _csi_dot.csi_dot[5]=_vehicle_attitude.yawspeed;
+    _csi_dot.csi_dot[5]=0.0f; //_vehicle_attitude.yawspeed;
 
 //    printf("csi_r: \n");
 //    for (size_t j = 0; j < 11; j++) {
@@ -2128,6 +2127,18 @@ void MulticopterPositionControl::compute_utbeta()
 //        printf(" %f ", (double)_csi_r_dot.csi_r_dot[j]);
 //    }
 //    printf("\n");
+//
+//    printf("csi (pos control): \n");
+//    for (size_t j = 0; j < 10; j++) {
+//        printf(" %-2.4g ", (double)_csi.csi[j]);
+//    }
+//    printf("\n");
+//
+//    printf("csi_dot (pos control): \n");
+//        for (size_t j = 0; j < 10; j++) {
+//            printf(" %-2.4g ", (double)_csi_dot.csi_dot[j]);
+//        }
+//        printf("\n");
 
     hrt_abstime t = hrt_absolute_time();
     float Ts = Ts_prev != 0 ? (t - Ts_prev) * 0.000001f : 0.0f;
@@ -2168,11 +2179,22 @@ void MulticopterPositionControl::compute_utbeta()
                     T_reduced(i,j)=am_T_betaw(i-2,j-3);
                 }
                 else if (i == j-2){
-                    T_reduced(i,j) = 1.0;
+                    T_reduced(i,j) = 1.0f;
                 }
             }
         }
     }
+    T_reduced(2,2) = 1.0f;
+
+//        //Print T_bw
+//        printf("T_reduced (pos control): \n");
+//        for (size_t i = 0; i < 8; i++) {
+//            for (size_t j = 0; j < 10; j++) {
+//                printf(" %-2.4g ", (double)T_reduced(i, j));
+//            }
+//            printf("\n");
+//        }
+//        printf("\n");
 
     //Calcolo u_tbeta (Incrociato perchè non calcolato per roll e pitch)
     for (int i = 0; i < 10; ++i) {
@@ -2182,23 +2204,34 @@ void MulticopterPositionControl::compute_utbeta()
         am_csi_r_dot(i)=_csi_r_dot.csi_r_dot[i];
 
     }
-        am_csi_r(3) = 0.0;
-        am_csi_r(4) = 0.0;
-        am_csi_r_dot(3) = 0.0;
-        am_csi_r_dot(4) = 0.0;
+        am_csi_r(3) = 0.0f;
+        am_csi_r(4) = 0.0f;
+        am_csi_r_dot(3) = 0.0f;
+        am_csi_r_dot(4) = 0.0f;
 
     am_eta_r_fb     = (T_reduced*(am_csi_r - am_csi))*Kpp;
     am_eta          = T_reduced*am_csi_dot;
     am_eta_r_ff     = T_reduced*am_csi_r_dot;
 
+//    printf("am_eta_r_fb (pos control): \n");
+//        for (size_t j = 0; j < 8; j++) {
+//            printf(" %-2.4g ", (double)am_eta_r_fb(j));
+//        }
+//        printf("\n");
+//
+//        printf("am_eta (pos control): \n");
+//            for (size_t j = 0; j < 8; j++) {
+//                printf(" %-2.4g ", (double)am_eta(j));
+//            }
+//            printf("\n");
+
     //Calcolo errore velocità + FeedForward
-    const float Fv = 0.3;
+    const float Fv = 0.3f;
     am_err_v = am_eta_r_fb + am_eta_r_ff*Fv - am_eta;
     //Calcolo coppia proporzionale
     am_u_tbeta = am_err_v*Kpv + am_u_tbeta_int; //VETTORI INIZIALIZZATI A 0?
     //Calcolo coppia integrale
     am_u_tbeta_int_add = am_err_v*Kiv*Ts; //CONTROLLARE CALCOLO TS
-
 
 //    for (int i = 0; i < 8; ++i) {
 //        //Calcolo errore velocità + FeedForward
@@ -2219,9 +2252,10 @@ void MulticopterPositionControl::compute_utbeta()
     for (int i = 0; i < 8; ++i) {
         _am_u_tbeta.am_u_tbeta[i]=am_u_tbeta(i);
         _am_u_tbeta.am_u_tbeta_int_add[i]=am_u_tbeta_int_add(i);
-//        printf("%f ",(double)_am_u_tbeta.am_u_tbeta[i]);
+//        printf("%-2.4g ",(double)_am_u_tbeta.am_u_tbeta[i]);
     }
 //    printf("\n");
+
     //Aggiorno uOrb csi, csi_dot, u_t_beta
     if (_csi_pub != nullptr) {
             orb_publish(ORB_ID(csi), _csi_pub, &_csi);
@@ -2260,32 +2294,28 @@ void MulticopterPositionControl::compute_tautbeta()
         orb_copy(ORB_ID(B_matrix), _B_sub, &_B_eta);
     }
 
-    for (int i = 0; i < 10; ++i) {
-        am_g_eta(i)=_g_eta.g[i];
-        for (int j = 0; j < 10; ++j) {
-            am_B_eta(i,j)=_B_eta.B[i+10*j];
-        }
-    }// DA VERIFICARE!!!
-
 /** Create Submatrices: */
     /** am_B_tz_tb */
     int ii = 0;
     int jj = 0;
     for (int i = 0; i < 5; i++) {
+        if((i!=2) && (i!=3)){
         for (int j = 0; j < 10; j++) {
-            if(i != 2 && i != 3 && j != 2 && j!= 3){
-                am_B_tz_tb(ii,jj) = am_B_eta(i,j);
-                ii++;
+            if((j!=2) && (j!=3)){
+                am_B_tz_tb(ii,jj) = _B_eta.B[i+10*j];
                 jj++;
             }
+        }
+        ii++;
+        jj = 0;
         }
     }
 
     /** am_g_tz; */
     ii = 0;
     for (int i = 0; i < 5; i++) {
-        if(i!=2 && i != 3 ){
-            am_g_tz(ii) = am_g_eta(i);
+        if((i!=2) && (i!=3) ){
+            am_g_tz(ii) = _g_eta.g[i];
             ii++;
         }
     }
@@ -2293,9 +2323,24 @@ void MulticopterPositionControl::compute_tautbeta()
 /** Calcola le Forze di riferimento Fx, e Fy (e Fz temporanea) con B, g e u. */
     am_Fxyz = am_B_tz_tb*am_u_tbeta + am_g_tz;
 
-//    printf("am_Fxyz:");
+//    printf("am_Fxyz: ");
 //    for (size_t j = 0; j < 3; j++) {
-//        printf(" %f ", (double)am_Fxyz(j));
+//        printf(" %-2.4g ", (double)am_Fxyz(j));
+//    }
+//    printf("\n");
+
+//    printf("am_B_tz_tb: \n");
+//    for (size_t i = 0; i < 3; i++) {
+//        for (size_t j = 0; j < 8; j++) {
+//            printf(" %-2.4g ", (double)am_B_tz_tb(i, j));
+//        }
+//        printf("\n");
+//    }
+//    printf("\n");
+//
+//    printf("am_g_tz: ");
+//    for (size_t j = 0; j < 3; j++) {
+//        printf(" %-2.4g ", (double)am_g_tz(j));
 //    }
 //    printf("\n");
 
