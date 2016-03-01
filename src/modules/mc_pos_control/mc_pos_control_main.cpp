@@ -181,8 +181,8 @@ private:
     struct am_u_tbeta_s           _am_u_tbeta;
     struct T_bw_matrix_s           _T_bw;
 
-    matrix::Vector<float,8> am_u_tbeta_int;
-    matrix::Vector<float,8> am_err_v;
+    math::Vector<8> am_u_tbeta_int;
+    math::Vector<8> am_err_v;
 
     float Kpp =  2.0f; // 6.0
     float Kpv =  0.3f; //Kp=0.3 J=0.0183  Kp/J = 16.39
@@ -191,15 +191,15 @@ private:
     //float csi_lp[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     //float csi_lp_old[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
-    matrix::Matrix<float,2,2> Ryaw_T;
-    matrix::Matrix<float,8,10> T_reduced;
-    matrix::Vector<float,10> am_csi;
-    matrix::Vector<float,10> am_csi_dot;
-    matrix::Vector<float,10> am_csi_r;
-    matrix::Vector<float,10> am_csi_r_dot;
-    matrix::Vector<float,8> am_eta;
-    matrix::Vector<float,8> am_eta_r_fb;
-    matrix::Vector<float,8> am_eta_r_ff;
+    math::Matrix<2,2> Ryaw_T;
+    math::Matrix<8,10> T_reduced;
+    math::Vector<10> am_csi;
+    math::Vector<10> am_csi_dot;
+    math::Vector<10> am_csi_r;
+    math::Vector<10> am_csi_r_dot;
+    math::Vector<8> am_eta;
+    math::Vector<8> am_eta_r_fb;
+    math::Vector<8> am_eta_r_ff;
 
     hrt_abstime Ts_prev;
     /** MC* ...........*/
@@ -320,17 +320,17 @@ private:
 	bool reset_int_flag;
 	bool am_saturation_utb_thrust_Fxyz;
         /** Input: */
-    matrix::Vector<float,8> am_u_tbeta;
-    matrix::Vector<float,8> am_u_tbeta_int_add;
+    math::Vector<8> am_u_tbeta;
+    math::Vector<8> am_u_tbeta_int_add;
         /** Output: */
-    matrix::Vector<float,3> am_Fxyz;
-    matrix::Vector<float,3>am_Fxyz_int_add;
+    math::Vector<3> am_Fxyz;
+    math::Vector<3>am_Fxyz_int_add;
     /** Matrices: */
 //    matrix::Vector<float,10> am_g_eta;
 //    matrix::Matrix<float,10,10> am_B_eta;
     /** Submatrices: */
-        matrix::Matrix<float,3,8> am_B_tz_tb;
-        matrix::Vector<float,3> am_g_tz;
+        math::Matrix<3,8> am_B_tz_tb;
+        math::Vector<3> am_g_tz;
 
     float ControlToActControl_T;// b = zeros(4,1);
     float Mass_quadrotor; // no battery
@@ -1627,8 +1627,8 @@ MulticopterPositionControl::task_main()
 
 					if (_control_mode.flag_control_offboard_enabled){
 				        if (reset_int_flag) {
-				            am_u_tbeta_int.setZero();
-				            am_u_tbeta_int_add.setZero();
+				            am_u_tbeta_int.zero();
+				            am_u_tbeta_int_add.zero();
 				            reset_int_flag = false;
 				            }
                         compute_utbeta();
@@ -2154,7 +2154,7 @@ void MulticopterPositionControl::compute_utbeta()
     float Ts = Ts_prev != 0 ? (t - Ts_prev) * 0.000001f : 0.0f;
     Ts_prev = t;
 
-    matrix::Matrix<float,6,2> am_T_betaw; am_T_betaw.setZero();
+    math::Matrix<6,2> am_T_betaw; am_T_betaw.zero();
 
     for (int i = 0; i < 6; ++i) {
         for (int j = 0; j < 2; ++j) {
@@ -2178,7 +2178,7 @@ void MulticopterPositionControl::compute_utbeta()
 
 
     Ryaw_T(0,0) = cyaw;Ryaw_T(0,1) = syaw;Ryaw_T(1,0) = -syaw;Ryaw_T(1,1) = cyaw;
-    T_reduced.setZero();
+    T_reduced.zero();
     for (int i = 0; i < 8; ++i) {
         for (int j = 0; j < 10; ++j) {
             if (i<2 && j<2){
@@ -2378,7 +2378,7 @@ void MulticopterPositionControl::compute_tautbeta()
         /** Effect of tbeta_dot_ref */
         am_Fxyz_int_add  = am_Fxyz + am_B_tz_tb*am_u_tbeta_int_add;
         /** SATURA?*/
-        if (ControlToActControl_T*(am_Fxyz_int_add.norm())>am_thr_max){
+        if (ControlToActControl_T*(am_Fxyz_int_add.length())>am_thr_max){
             am_saturation_utb_thrust_Fxyz = true;
         }
         else{

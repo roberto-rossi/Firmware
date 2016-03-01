@@ -173,41 +173,41 @@ private:
     struct am_flag_s                _am_flag;
     struct am_tau_s                 _am_tau;
 
-    matrix::Vector<float,10> am_g_eta;//(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0);
-    matrix::Matrix<float,10,10> am_B_eta;//(0,0,0,0,0,0,0,0,0,0);
-    matrix::Matrix<float,6,2> am_T_betaw;
-    matrix::Matrix<float,8,2> am_Bt_tb_i;
-    matrix::Matrix<float,8,6> am_Bb_tb_i;
-    matrix::Matrix<float,6,8> am_Bb_tb_i_pinv;
+    math::Vector<10> am_g_eta;//(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0);
+    math::Matrix<10,10> am_B_eta;//(0,0,0,0,0,0,0,0,0,0);
+    math::Matrix<6,2> am_T_betaw;
+    math::Matrix<8,2> am_Bt_tb_i;
+    math::Matrix<8,6> am_Bb_tb_i;
+    math::Matrix<6,8> am_Bb_tb_i_pinv;
 
     /** Submatrices: */
-    matrix::Vector<float,2> am_g_t;
-    matrix::Vector<float,2> am_g_w;//(0,0,0,0,0,0,0,0,0,0);
-    matrix::Vector<float,6> am_g_beta;//(0,0,0,0,0,0,0,0,0,0);
-    matrix::Matrix<float,2,2> am_B_ww;// am_B_ww.set_row(0,Bww_r1); am_B_ww.set_row(1,Bww_r2); am_B_ww.set_row(2,Bww_r3);
-    matrix::Matrix<float,6,2> am_B_betaw;
-    matrix::Matrix<float,2,6> am_B_wbeta;
+    math::Vector<2> am_g_t;
+    math::Vector<2> am_g_w;//(0,0,0,0,0,0,0,0,0,0);
+    math::Vector<6> am_g_beta;//(0,0,0,0,0,0,0,0,0,0);
+    math::Matrix<2,2> am_B_ww;// am_B_ww.set_row(0,Bww_r1); am_B_ww.set_row(1,Bww_r2); am_B_ww.set_row(2,Bww_r3);
+    math::Matrix<6,2> am_B_betaw;
+    math::Matrix<2,6> am_B_wbeta;
 
     /** Intermediate variables: */
-    matrix::Vector<float,6> am_tau_beta_in;
-    matrix::Vector<float,8> am_effec_tau;
-    matrix::Matrix<float,8,8> am_B_tb_i;
-    matrix::Matrix<float,6,6> am_Bbb_tb_i;
+    math::Vector<6> am_tau_beta_in;
+    math::Vector<8> am_effec_tau;
+    math::Matrix<8,8> am_B_tb_i;
+    math::Matrix<6,6> am_Bbb_tb_i;
 
-    matrix::Vector<float,6> am_beta_dot_ref;
+    math::Vector<6> am_beta_dot_ref;
 
-    matrix::Vector<float,6> am_tau_beta;
-    matrix::Vector<float,2> am_tau_omega_xy;
-    matrix::Matrix<float,2,6> am_T_betaw_t;
-    matrix::Vector<float,2> am_tau_omega_in;
+    math::Vector<6> am_tau_beta;
+    math::Vector<2> am_tau_omega_xy;
+    math::Matrix<2,6> am_T_betaw_t;
+    math::Vector<2> am_tau_omega_in;
 
-    matrix::Vector<float,2> am_tau_quad_int_add_aux;
-    matrix::Vector<float,2> am_tau_quad_int_add;
-    matrix::Vector<float,6> am_tau_beta_int_add;
+    math::Vector<2> am_tau_quad_int_add_aux;
+    math::Vector<2> am_tau_quad_int_add;
+    math::Vector<6> am_tau_beta_int_add;
 
-    matrix::Vector<float,8> am_u_tbeta_int_add_noZ;
-    matrix::Vector<float,6> am_BZ_tb_i_pinv;
-    matrix::Vector<float,6> am_tau_utb_Z_aux;
+    math::Vector<8> am_u_tbeta_int_add_noZ;
+    math::Vector<6> am_BZ_tb_i_pinv;
+    math::Vector<6> am_tau_utb_Z_aux;
     /** MC* ...........*/
 
 	orb_advert_t	_v_rates_sp_pub;		/**< rate setpoint publication */
@@ -245,14 +245,14 @@ private:
 	/** RR* ...........*/
 
     /** Da Funzione principale*/
-    matrix::Vector<float,8> am_u_tbeta;
-    matrix::Vector<float,2> am_omega_xy_dot_ref;
-    matrix::Vector<float,8> am_u_tbeta_int_add;
-    matrix::Vector<float,2> am_omega_xy_dot_ref_int_add;
-    matrix::Vector<float,2> am_att_control_acc_i;
+    math::Vector<8> am_u_tbeta;
+    math::Vector<2> am_omega_xy_dot_ref;
+    math::Vector<8> am_u_tbeta_int_add;
+    math::Vector<2> am_omega_xy_dot_ref_int_add;
+    math::Vector<2> am_att_control_acc_i;
     float am_thrust;
-    matrix::Vector<float,3> am_tau_quad;
-    matrix::Vector<float,4> am_tau_robot;
+    math::Vector<3> am_tau_quad;
+    math::Vector<4> am_tau_robot;
 
 	bool am_saturation_omega_thrust;
 	bool am_saturation_omega_tau_quad;
@@ -267,7 +267,7 @@ private:
 	bool reset_int_flag;
 
     float ControlToActControl_T;
-	matrix::Vector<float,3> ControlToActControl_tau;
+	math::Vector<3> ControlToActControl_tau;
 
     /** RR* ...........*/
 
@@ -489,7 +489,7 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_thrust_sp = 0.0f;
 	_att_control.zero();
 	/** RR .........*/
-    am_att_control_acc_i.setZero();
+    am_att_control_acc_i.zero();
     ControlToActControl_T = 0.0192f;
     ControlToActControl_tau(0) = 0.0653f;
     ControlToActControl_tau(1) = 0.1624f;
@@ -873,7 +873,7 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	/* reset integral if disarmed */
 	if (!_armed.armed || !_vehicle_status.is_rotary_wing) {
 		_rates_int.zero();
-		am_att_control_acc_i.setZero();
+		am_att_control_acc_i.zero();
 	}
 
 	/* current body angular rates */
@@ -901,7 +901,7 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
     /** add to integral action?*/
     math::Vector<3> _att_control_acc_i_add =  _params.rate_i.emult(rates_err) * dt;
 
-    matrix::Vector<float,2> am_omega_xy_dot_ref_int_add;
+    math::Vector<2> am_omega_xy_dot_ref_int_add;
     am_omega_xy_dot_ref_int_add(0) = _att_control_acc_i_add(0);
     am_omega_xy_dot_ref_int_add(1) = _att_control_acc_i_add(1);
 
@@ -910,8 +910,8 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
     if (_v_control_mode.flag_control_offboard_enabled){
         if (reset_int_flag) {
-            am_omega_xy_dot_ref_int_add.setZero();
-            am_att_control_acc_i.setZero();
+            am_omega_xy_dot_ref_int_add.zero();
+            am_att_control_acc_i.zero();
             reset_int_flag = false;
             }
         /** Calcola coppie finali e saturazioni*/
@@ -1222,7 +1222,7 @@ MulticopterAttitudeControl::compute_final_torques()
     }
 
     /** Calcola le tb_dot_ref con Bb_tb_i, Bt_tb_i, g, tau_beta_in. */
-    am_beta_dot_ref = am_Bb_tb_i.transpose()*am_effec_tau;
+    am_beta_dot_ref = am_Bb_tb_i.transposed()*am_effec_tau;
 
     /** Tau_beta = tau_b_inertia + (C_betav + g_beta) + (B_betaw * omega_dot_ref) */
     am_tau_beta = am_g_beta + am_tau_beta_in; // + am_B_betaw*am_omega_xy_dot_ref;
@@ -1263,7 +1263,7 @@ MulticopterAttitudeControl::compute_final_torques()
     /** Tau_omega_xy = (B_ww * omega_dot_ref_xy) + (B_wbeta * beta_dot_ref) + (C_wv + g_w) */
     am_tau_omega_xy = am_B_ww*am_omega_xy_dot_ref + (am_B_wbeta*am_beta_dot_ref) +  am_g_w;
 
-    am_T_betaw_t = am_T_betaw.transpose();
+    am_T_betaw_t = am_T_betaw.transposed();
 
     //printf("thrust: %-2.4g beta: %-2.4g %-2.4g %-2.4g %-2.4g %-2.4g omega_xy: %-2.4g %-2.4g \n",(double)am_tau_beta(0),(double)am_tau_beta(1),(double)am_tau_beta(2),(double)am_tau_beta(3),(double)am_tau_beta(4),(double)am_tau_beta(5),(double)am_tau_omega_xy(0),(double)am_tau_omega_xy(1));
 
@@ -1413,7 +1413,7 @@ MulticopterAttitudeControl::compute_final_torques()
                     am_tau_beta_int_add     -=   am_B_betaw*am_omega_xy_dot_ref_int_add;
                 }
 
-                matrix::Vector<float,6> am_tau_utb_aux = am_Bb_tb_i_pinv*am_u_tbeta_int_add_noZ;
+                math::Vector<6> am_tau_utb_aux = am_Bb_tb_i_pinv*am_u_tbeta_int_add_noZ;
                     am_tau_quad_int_add_aux = (am_B_wbeta*am_Bbb_tb_i + am_T_betaw_t)*am_tau_utb_aux;
 
                 am_tau_quad_int_add(0)  +=   ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
