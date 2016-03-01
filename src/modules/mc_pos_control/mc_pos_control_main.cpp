@@ -184,9 +184,12 @@ private:
     matrix::Vector<float,8> am_u_tbeta_int;
     matrix::Vector<float,8> am_err_v;
 
-    float Kpp = 0.1f;
-    float Kpv = 1.0f;
-    float Kiv = 0.1f;
+    float Kpp =  2.0f; // 6.0
+    float Kpv =  0.3f; //Kp=0.3 J=0.0183  Kp/J = 16.39
+    float Kiv =  1.2f; //Kp=1.2 J=0.0183  Kp/J = 65.57
+
+    //float csi_lp[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    //float csi_lp_old[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
     matrix::Matrix<float,2,2> Ryaw_T;
     matrix::Matrix<float,8,10> T_reduced;
@@ -314,6 +317,7 @@ private:
 	float _takeoff_thrust_sp;
 
 	/** RR* ..................... */
+	bool reset_int_flag;
 	bool am_saturation_utb_thrust_Fxyz;
         /** Input: */
     matrix::Vector<float,8> am_u_tbeta;
@@ -1622,6 +1626,11 @@ MulticopterPositionControl::task_main()
 					math::Vector<3> thrust_sp;
 
 					if (_control_mode.flag_control_offboard_enabled){
+				        if (reset_int_flag) {
+				            am_u_tbeta_int.setZero();
+				            am_u_tbeta_int_add.setZero();
+				            reset_int_flag = false;
+				            }
                         compute_utbeta();
                         bool updated;
                         orb_check(_am_flag_sub, &updated);
@@ -1642,6 +1651,7 @@ MulticopterPositionControl::task_main()
                         }
 
                     }else{
+                        reset_int_flag = true;
                         thrust_sp = ( vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) )*Mass_quadrotor*ControlToActControl_T + thrust_int; // DA PENSARE SE AGGIUNGERE GRAVITA'!!!
                         //math::Vector<3> AM_Thrust = vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) + thrust_int;
                     }
@@ -2196,20 +2206,36 @@ void MulticopterPositionControl::compute_utbeta()
 //        }
 //        printf("\n");
 
+    //const float tau_lp = 1/30.0f;
     //Calcolo u_tbeta (Incrociato perchè non calcolato per roll e pitch)
     for (int i = 0; i < 10; ++i) {
+        //csi_lp[i] = (csi_lp_old[i]*tau_lp+_csi.csi[i]*Ts)/(Ts + tau_lp);
         am_csi(i) = _csi.csi[i];
         am_csi_dot(i)=_csi_dot.csi_dot[i];
         am_csi_r(i) = _csi_r.csi_r[i];
         am_csi_r_dot(i)=_csi_r_dot.csi_r_dot[i];
 
     }
+//csi_dot roll e pitch a 0
+    am_csi(3)=0.0f;
+    am_csi(4)=0.0f;
+    am_csi(5)=0.0f;
+    am_csi_dot(3)=0.0f;
+    am_csi_dot(4)=0.0f;
+    am_csi_dot(5)=0.0f;
+
         am_csi_r(3) = 0.0f;
         am_csi_r(4) = 0.0f;
         am_csi_r_dot(3) = 0.0f;
         am_csi_r_dot(4) = 0.0f;
 
-    am_eta_r_fb     = (T_reduced*(am_csi_r - am_csi))*Kpp;
+//    am_eta_r_fb     = (T_reduced*(am_csi_r - am_csi))*Kpp;
+    for (int i = 0; i < 8; ++i) {
+        if (i<3) {
+        am_eta_r_fb(i) = (am_csi_r(i) - am_csi(i))*Kpp; }
+        else {
+            am_eta_r_fb(i) = (am_csi_r(i+2) - am_csi(i+2))*Kpp; }
+    }
     am_eta          = T_reduced*am_csi_dot;
     am_eta_r_ff     = T_reduced*am_csi_r_dot;
 

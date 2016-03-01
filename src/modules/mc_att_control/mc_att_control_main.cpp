@@ -264,6 +264,8 @@ private:
 	bool am_saturation_utbZ_tau_quad;
 	bool am_saturation_utbZ_tau_robot;
 
+	bool reset_int_flag;
+
     float ControlToActControl_T;
 	matrix::Vector<float,3> ControlToActControl_tau;
 
@@ -883,86 +885,97 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	/* angular rates error */
 	math::Vector<3> rates_err = _rates_sp - rates;
 
-
 	/** RR* .................... */
-            /** Bww solo per controllo quadricottero*/
-	        math::Vector<3> Bww_r1(0.0429,0,0); math::Vector<3> Bww_r2(0,0.0269,0); math::Vector<3> Bww_r3(0,0,0.0721);
-            math::Matrix<3,3> Bww; Bww.set_row(0,Bww_r1); Bww.set_row(1,Bww_r2); Bww.set_row(2,Bww_r3);
+    /** Bww solo per controllo quadricottero*/
+    math::Vector<3> Bww_r1(0.0429,0,0);
+    math::Vector<3> Bww_r2(0,0.0269,0);
+    math::Vector<3> Bww_r3(0,0,0.0721);
+    math::Matrix<3,3> Bww;
+    Bww.set_row(0,Bww_r1);
+    Bww.set_row(1,Bww_r2);
+    Bww.set_row(2,Bww_r3);
+
     /** Accelerazioni */
-	math::Vector<3> am_att_control_acc_pd = _params.rate_p.emult(rates_err) +  _params.rate_d.emult(_rates_prev - rates) / dt +
-		       _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
+	math::Vector<3> am_att_control_acc_pd = _params.rate_p.emult(rates_err) +  _params.rate_d.emult(_rates_prev - rates) / dt + _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
 
-            /** add to integral action?*/
-            math::Vector<3> _att_control_acc_i_add =  _params.rate_i.emult(rates_err) * dt;
+    /** add to integral action?*/
+    math::Vector<3> _att_control_acc_i_add =  _params.rate_i.emult(rates_err) * dt;
 
-    matrix::Vector<float,2> am_omega_xy_dot_ref_int_add; am_omega_xy_dot_ref_int_add(0) = _att_control_acc_i_add(0);am_omega_xy_dot_ref_int_add(1) = _att_control_acc_i_add(1);
+    matrix::Vector<float,2> am_omega_xy_dot_ref_int_add;
+    am_omega_xy_dot_ref_int_add(0) = _att_control_acc_i_add(0);
+    am_omega_xy_dot_ref_int_add(1) = _att_control_acc_i_add(1);
 
-    am_omega_xy_dot_ref(0) = am_att_control_acc_pd(0)/100 ; //+ am_att_control_acc_i(0);
-    am_omega_xy_dot_ref(1) = am_att_control_acc_pd(1)/100 ; //+ am_att_control_acc_i(1);
+    am_omega_xy_dot_ref(0) = am_att_control_acc_pd(0); //+ am_att_control_acc_i(0);
+    am_omega_xy_dot_ref(1) = am_att_control_acc_pd(1); //+ am_att_control_acc_i(1);
 
     if (_v_control_mode.flag_control_offboard_enabled){
+        if (reset_int_flag) {
+            am_omega_xy_dot_ref_int_add.setZero();
+            am_att_control_acc_i.setZero();
+            reset_int_flag = false;
+            }
         /** Calcola coppie finali e saturazioni*/
-            compute_final_torques();
+        compute_final_torques();
         /** Assegna coppie*/
             for (int i = 0; i < 3; i++) {
                     _att_control(i) = am_tau_quad(i);
             }
             //am_thrust = am_thrust;
 
-            printf("rates_err: \n");
-            for (size_t i = 0; i < 3; i++) {
-                printf(" %-2.4g ", (double)rates_err(i));
-            }
-            printf("\n");
-
-
-            printf("u_tbeta (att_control): \n");
-            for (size_t i = 0; i < 8; i++) {
-                printf(" %-2.4g ", (double)am_u_tbeta(i));
-            }
-            printf("\n");
-
-            printf("T_bw: \n");
-            for (size_t i = 0; i < 6; i++) {
-                for (size_t j = 0; j < 2; j++) {
-                    printf(" %-2.4g ", (double)am_T_betaw(i, j));
-                }
-                printf("\n");
-            }
-            printf("\n");
-
-            printf("tau_beta: \n");
-            for (size_t j = 0; j < 6; j++) {
-                printf(" %-2.4g ", (double)am_tau_beta(j));
-            }
-            printf("\n");
-
-            printf("g beta = \n");
-            for (int j = 0; j < 6; j++) {
-                printf(" %-2.4g ", (double)am_g_beta(j));
-            }
-            printf("\n");
-
-            printf("tau beta in = \n");
-            for (int j = 0; j < 6; j++) {
-                printf(" %-2.4g ", (double)am_tau_beta_in(j));
-            }
-            printf("\n");
-
-            printf("B_betaw: \n");
-            for (size_t i = 0; i < 6; i++) {
-                for (size_t j = 0; j < 2; j++) {
-                    printf(" %-2.4g ", (double)am_B_betaw(i, j));
-                }
-                printf("\n");
-            }
-            printf("\n");
-
-            printf("omega_xy: \n");
-            for (size_t j = 0; j < 2; j++) {
-                printf(" %-2.4g ", (double)am_omega_xy_dot_ref(j));
-            }
-            printf("\n");
+//            printf("rates_err: \n");
+//            for (size_t i = 0; i < 3; i++) {
+//                printf(" %-2.4g ", (double)rates_err(i));
+//            }
+//            printf("\n");
+//
+//
+//            printf("u_tbeta (att_control): \n");
+//            for (size_t i = 0; i < 8; i++) {
+//                printf(" %-2.4g ", (double)am_u_tbeta(i));
+//            }
+//            printf("\n");
+//
+//            printf("T_bw: \n");
+//            for (size_t i = 0; i < 6; i++) {
+//                for (size_t j = 0; j < 2; j++) {
+//                    printf(" %-2.4g ", (double)am_T_betaw(i, j));
+//                }
+//                printf("\n");
+//            }
+//            printf("\n");
+//
+//            printf("tau_beta: \n");
+//            for (size_t j = 0; j < 6; j++) {
+//                printf(" %-2.4g ", (double)am_tau_beta(j));
+//            }
+//            printf("\n");
+//
+//            printf("g beta = \n");
+//            for (int j = 0; j < 6; j++) {
+//                printf(" %-2.4g ", (double)am_g_beta(j));
+//            }
+//            printf("\n");
+//
+//            printf("tau beta in = \n");
+//            for (int j = 0; j < 6; j++) {
+//                printf(" %-2.4g ", (double)am_tau_beta_in(j));
+//            }
+//            printf("\n");
+//
+//            printf("B_betaw: \n");
+//            for (size_t i = 0; i < 6; i++) {
+//                for (size_t j = 0; j < 2; j++) {
+//                    printf(" %-2.4g ", (double)am_B_betaw(i, j));
+//                }
+//                printf("\n");
+//            }
+//            printf("\n");
+//
+//            printf("omega_xy_dot_ref: \n");
+//            for (size_t j = 0; j < 2; j++) {
+//                printf(" %-2.4g ", (double)am_omega_xy_dot_ref(j));
+//            }
+//            printf("\n");
 
 
             _thrust_sp = am_thrust;
@@ -976,6 +989,7 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
             }
 
     }else{
+        reset_int_flag = true;
         math::Vector<3> _att_control_pd; // =
         math::Vector<3> am_tau_pd_aux = Bww*am_att_control_acc_pd;
         for (int i = 0; i < 3; i++) {
@@ -1020,15 +1034,11 @@ MulticopterAttitudeControl::task_main_trampoline(int argc, char *argv[])
 
 void
 MulticopterAttitudeControl::compute_final_torques()
-/** oppure: void compute_final_torques(int argc, char *argv[])
-*/
 {
-/** Ho B_csi, g_csi, T_bw. Dentro la funzione mi si deve passare tau_b_inertia,beta_dot_ref, omega_dot_ref_xy
-*/
+/** Ho B_csi, g_csi, T_bw. Dentro la funzione mi si deve passare tau_b_inertia,beta_dot_ref, omega_dot_ref_xy */
 
 /** Input: */
     /** Da ORB */
-
     bool updated;
     orb_check(_am_u_tbeta_sub, &updated);
     if (updated) {
@@ -1072,7 +1082,7 @@ MulticopterAttitudeControl::compute_final_torques()
         for (int j = 0; j < 10; ++j) {
             am_B_eta(i,j)=_B_eta.B[i+10*j];
         }
-    }// DA VERIFICARE!
+    }
 
 //    printf("g_eta (att_control): \n");
 //    for (size_t i = 0; i < 10; i++) {
@@ -1084,7 +1094,7 @@ MulticopterAttitudeControl::compute_final_torques()
         for (int j = 0; j < 2; ++j) {
             am_T_betaw(i,j)=_T_bw.T_bw[i+6*j];
         }
-    }// DA VERIFICARE!
+    }
 
 //    printf("T_bw: \n");
 //    for (size_t i = 0; i < 6; i++) {
@@ -1111,7 +1121,7 @@ MulticopterAttitudeControl::compute_final_torques()
         for (int j = 0; j < 2; ++j) {
             am_Bt_tb_i(i,j)=_Bt_tb_i.Bt_tb_i[i+8*j];
         }
-    }// DA VERIFICARE!
+    }
 
 //    printf("Bt_tb_i: \n");
 //    for (size_t i = 0; i < 8; i++) {
@@ -1126,7 +1136,7 @@ MulticopterAttitudeControl::compute_final_torques()
         for (int j = 0; j < 6; ++j) {
             am_Bb_tb_i(i,j)=_Bb_tb_i.Bb_tb_i[i+8*j];
         }
-    }// DA VERIFICARE!
+    }
 
 //    printf("Bb_tb_i: \n");
 //    for (size_t i = 0; i < 8; i++) {
@@ -1141,7 +1151,7 @@ MulticopterAttitudeControl::compute_final_torques()
         for (int j = 0; j < 8; ++j) {
             am_Bb_tb_i_pinv(i,j)=_Bb_tb_i_pinv.Bb_tb_i_pinv[i+6*j];
         }
-    }// DA VERIFICARE!
+    }
 
 //    printf("Bb_tb_i_pinv: \n");
 //    for (size_t i = 0; i < 6; i++) {
@@ -1195,7 +1205,11 @@ MulticopterAttitudeControl::compute_final_torques()
 
 
 /** Calcola le tau_beta_in con Bb_tb_i, Bb_tb_i_pinv, g. */
-    am_tau_beta_in = am_Bb_tb_i_pinv*(am_u_tbeta + am_Bt_tb_i*am_g_t);
+    for (int i = 0; i < 6; ++i) {
+        am_tau_beta_in(i) = am_u_tbeta(i+2); //am_Bb_tb_i_pinv*(am_u_tbeta + am_Bt_tb_i*am_g_t);
+    }
+
+//    am_tau_beta_in = am_Bb_tb_i_pinv*(am_u_tbeta + am_Bt_tb_i*am_g_t);
 
     /** am_effec_tau; */
     for (int i = 0; i < 8; i++) {
@@ -1254,10 +1268,10 @@ MulticopterAttitudeControl::compute_final_torques()
     //printf("thrust: %-2.4g beta: %-2.4g %-2.4g %-2.4g %-2.4g %-2.4g omega_xy: %-2.4g %-2.4g \n",(double)am_tau_beta(0),(double)am_tau_beta(1),(double)am_tau_beta(2),(double)am_tau_beta(3),(double)am_tau_beta(4),(double)am_tau_beta(5),(double)am_tau_omega_xy(0),(double)am_tau_omega_xy(1));
 
     /** Restituisce tau_quad, Thrust, Tau_robot*/
-    const float am_thr_max = 0.9; // CONTROLLA!!!!!
-    const float am_thr_min = 0.1; // CONTROLLA!!!!!
-    const float am_tau_quad_max = 0.3;
-    const float am_tau_robot_max = 0.5; //!!!
+    const float am_thr_max = 0.9f; // CONTROLLA!!!!!
+    const float am_thr_min = 0.1f; // CONTROLLA!!!!!
+    const float am_tau_quad_max = 0.3f;
+    const float am_tau_robot_max = 1.0f; //!!!
 
     /** Restituisce Thrust*/
     am_thrust = ControlToActControl_T*am_tau_beta(0);
@@ -1310,7 +1324,7 @@ MulticopterAttitudeControl::compute_final_torques()
         /** Effect of am_u_tbeta_Z_int_add */
             float am_u_tbeta_Z_int_add = am_u_tbeta_int_add(2);
             am_u_tbeta_int_add_noZ = am_u_tbeta_int_add;
-            am_u_tbeta_int_add_noZ(2) = 0.0;
+            am_u_tbeta_int_add_noZ(2) = 0.0f;
 
                 for (int j = 0; j < 6; j++) {
                     am_BZ_tb_i_pinv(j) = am_Bb_tb_i_pinv(j,2);
@@ -1318,7 +1332,7 @@ MulticopterAttitudeControl::compute_final_torques()
 
             am_tau_utb_Z_aux = am_BZ_tb_i_pinv*am_u_tbeta_Z_int_add;
 
-                am_tau_quad_int_add_aux = (am_B_wbeta*am_Bbb_tb_i + am_T_betaw_t)*am_tau_utb_Z_aux;
+            am_tau_quad_int_add_aux = (am_B_wbeta*am_Bbb_tb_i + am_T_betaw_t)*am_tau_utb_Z_aux;
             am_tau_quad_int_add(0)  =   am_tau_quad(0) + ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
             am_tau_quad_int_add(1)  =   am_tau_quad(1) + ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
             am_tau_beta_int_add     =   am_tau_beta + am_tau_utb_Z_aux;
@@ -1392,7 +1406,6 @@ MulticopterAttitudeControl::compute_final_torques()
                 }
 
         /** Effect of tbeta_dot_ref */
-
                  if (am_saturation_omega_tau_quad || am_saturation_omega_tau_robot || am_saturation_omega_thrust){
                      // Leva l'incremento di coppia dovuto a omega
                     am_tau_quad_int_add(0)  -=   ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
