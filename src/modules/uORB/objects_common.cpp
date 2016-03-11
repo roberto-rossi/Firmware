@@ -319,4 +319,7 @@ ORB_DEFINE(Bt_tb_i_matrix, struct Bt_tb_i_matrix_s);
 
 #include "topics/am_tau.h"
 ORB_DEFINE(am_tau, struct am_tau_s);
+
+#include "topics/dynamixel_state.h"
+ORB_DEFINE(dynamixel_state, struct dynamixel_state_s);
 //FINE MODIFICA

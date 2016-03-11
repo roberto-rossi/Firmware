@@ -78,6 +78,7 @@
 #include "topics/am_flag.h"
 #include "topics/am_u_tbeta.h"
 #include "topics/am_tau.h"
+#include "topics/dynamixel_state.h"
 //FINE MODIFICA
 
 #include <px4_defines.h>
@@ -197,6 +198,7 @@ template class __EXPORT Subscription<polimi_attitude_ned_s>;
 template class __EXPORT Subscription<am_flag_s>;
 template class __EXPORT Subscription<am_u_tbeta_s>;
 template class __EXPORT Subscription<am_tau_s>;
+template class __EXPORT Subscription<dynamixel_state_s>;
 //FINE MODIFICA
 
 } // namespace uORB

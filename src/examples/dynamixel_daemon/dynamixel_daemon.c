@@ -65,6 +65,7 @@
 #include <uORB/topics/csi_r.h>
 #include <uORB/topics/csi_dot_r.h>
 #include <uORB/topics/vehicle_control_mode.h>
+#include <uORB/topics/dynamixel_state.h>
 
 static bool thread_should_exit = false;		/**< daemon exit flag */
 static bool thread_running = false;		/**< daemon status flag */
@@ -162,15 +163,15 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     memset(&csi_r_dot, 0, sizeof(csi_r_dot));
 	int csi_r_dot_sub_fd = orb_subscribe(ORB_ID(csi_dot_r));
 
-	struct csi_s csi;
-	memset(&csi, 0, sizeof(csi));
-	orb_advert_t csi_pub_fd = orb_advertise(ORB_ID(csi), &csi);
-	int csi_sub_fd = orb_subscribe(ORB_ID(csi));
+//	struct csi_s csi;
+//	memset(&csi, 0, sizeof(csi));
+//	orb_advert_t csi_pub_fd = orb_advertise(ORB_ID(csi), &csi);
+//	int csi_sub_fd = orb_subscribe(ORB_ID(csi));
 
-	struct csi_dot_s csi_dot;
-    memset(&csi_dot, 0, sizeof(csi_dot));
-    orb_advert_t csi_dot_pub_fd = orb_advertise(ORB_ID(csi_dot), &csi_dot);
-    int csi_dot_sub_fd = orb_subscribe(ORB_ID(csi_dot));
+//	struct csi_dot_s csi_dot;
+//  memset(&csi_dot, 0, sizeof(csi_dot));
+//  orb_advert_t csi_dot_pub_fd = orb_advertise(ORB_ID(csi_dot), &csi_dot);
+//  int csi_dot_sub_fd = orb_subscribe(ORB_ID(csi_dot));
 
     struct am_tau_s am_tau;
     memset(&am_tau, 0, sizeof(am_tau));
@@ -180,6 +181,11 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     memset(&control_mode, 0, sizeof(control_mode));
     int control_mode_sub = orb_subscribe(ORB_ID(vehicle_control_mode));
 
+    struct dynamixel_state_s dynamixel_state;
+    memset(&dynamixel_state, 0, sizeof(dynamixel_state));
+    orb_advert_t dynamixel_state_pub_fd = orb_advertise(ORB_ID(dynamixel_state), &dynamixel_state);
+
+
     int *state;
     int res;
     double torque[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
@@ -187,10 +193,10 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     double err_v[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
     double err_pos[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
     double err_v_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-    float csi_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-    float csi_dot_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    float q_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    float q_dot_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
     double Ts = 0.02;
-    const float  c_dev = 20.0f; //15
+    const float  c_dev = 60.0f;
     const double Kpp =  6;
     const double Kpv =  0.3;
     const double Kiv =  1.2;
@@ -232,14 +238,8 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     //Main Loop
 	while (!thread_should_exit) {
 	    //Read position and speed from uOrb
-        orb_copy(ORB_ID(csi), csi_sub_fd, &csi);
-        orb_copy(ORB_ID(csi_dot), csi_dot_sub_fd, &csi_dot);
-        orb_copy(ORB_ID(csi_r), csi_r_sub_fd, &csi_r);
-        orb_copy(ORB_ID(csi_dot_r), csi_r_dot_sub_fd, &csi_r_dot);
-
         orb_copy(ORB_ID(am_tau), am_tau_sub, &am_tau);
         orb_copy(ORB_ID(vehicle_control_mode), control_mode_sub, &control_mode);
-
         //Read cycle
         for (int k = 1; k < 6; ++k) {
             state = dxl_read_state(k);
@@ -249,13 +249,12 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
                 usleep(1000);
                 res = dxl_initialize(1,9);
             } else {
-                csi.csi[k+5]=((float)state[0]-512)/195.5696f;
-                csi_dot.csi_dot[k+5]=(csi_dot_old[k-1]+c_dev*(csi.csi[k+5]-csi_old[k-1]))/((float)Ts*c_dev+1);
-                csi_old[k-1] = csi.csi[k+5];
-                csi_dot_old[k-1] = csi_dot.csi_dot[k+5];
+                dynamixel_state.q[k-1]=((float)state[0]-512)/195.5696f;
+                dynamixel_state.q_dot[k-1]=(q_dot_old[k-1]+c_dev*(dynamixel_state.q[k-1]-q_old[k-1]))/((float)Ts*c_dev+1);
+                q_old[k-1] = dynamixel_state.q[k-1];
+                q_dot_old[k-1] = dynamixel_state.q_dot[k-1];
             }
         }
-
         //Calculate Ts
         gettimeofday (&tv, NULL);
         Ts = (tv.tv_usec-tv_old)/1000000.0;
@@ -270,16 +269,16 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
                 memset(&err_v_old, 0, sizeof(err_v_old));
                 reset_flag = 0;
             }
+            orb_copy(ORB_ID(csi_r), csi_r_sub_fd, &csi_r);
+            orb_copy(ORB_ID(csi_dot_r), csi_r_dot_sub_fd, &csi_r_dot);
             //PPI Controller
             for (int i = 0; i < 5; ++i) {
                 //Calcolo errore di posizione
-                err_pos[i]=(double)(csi_r.csi_r[i+6] - csi.csi[i+6]);
+                err_pos[i]=(double)(csi_r.csi_r[i+6] - dynamixel_state.q[i]);
                 //Calcolo errore velocità + FeedForward
-                err_v[i] = err_pos[i]*Kpp + (double)csi_r_dot.csi_r_dot[i+6] - (double)csi_dot.csi_dot[i+6];
+                err_v[i] = err_pos[i]*Kpp + (double)csi_r_dot.csi_r_dot[i+6] - (double)dynamixel_state.q_dot[i];
                 //Controllore PI discretizzato con EI
                 torque[i] = torque_old[i] + (err_v[i]-err_v_old[i])*Kpv + err_v[i]*Ts*Kiv;
-//                if (i==3)
-//                    torque[i] = 0.6*((double)csi_r_dot.csi_r_dot[i+6]-(double)csi_dot.csi_dot[i+6]);
                 //Salvo per passo successivo
                 torque_old[i]=torque[i];
                 err_v_old[i]=err_v[i];
@@ -288,45 +287,18 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
                     torque[i] = 1.0;
                 if (torque[i] < -1.0)
                     torque[i] = -1.0;
-                //Print coppia
-                //printf("Coppia: %-2.4g  ",torque[i]);
                 //Conversione in bit
                 bit_torque[i] = (int)(torque[i] / 1.5 * 1000); //*1000
                 if (bit_torque[i]< 0)
                     bit_torque[i] = - bit_torque[i] + 1024;
-                //Print Coppia in bit
-                //printf("bit: %-4d  ",bit_torque[i]);
-        }
-
-//            struct timeval T1;
-//            gettimeofday (&T1, NULL);
-//
-//            float Tcheck = (T1.tv_sec-Tstart.tv_sec) + (T1.tv_usec-Tstart.tv_usec)/1000000000.0f;
-//            printf("Tcheck: %-2.4g \n", (double)Tcheck );
-//            if (Tcheck > 1.0f && Tcheck < 2.0f) {
-//                torque[3] = 0.5;
-//            }
-//            else if (Tcheck > 2.0f && Tcheck < 3.0f ){
-//                torque[3] = -0.5f;
-//            } else
-//                torque[3] = 0.0f;
-//
-//        bit_torque[3] = (int)(torque[3] / 1.5 * 1000); //*1000
-//        if (bit_torque[3]< 0)
-//            bit_torque[3] = - bit_torque[3] + 1024;
-
-        //printf("\n");
-
-        //printf("Csi_dot: %-2.4g  torque: %-2.4g  bit_torque: %-d \n",(double)csi_dot.csi_dot[6],torque[0],bit_torque[0]);
-        //printf("Err_pos: %-2.4g  Csi_r_dot: %-2.4g  Csi_dot: %-2.4g  \n",err_pos[0],(double)csi_r_dot.csi_r_dot[6],(double)csi_dot.csi_dot[6]);
-        //printf("Torque: %-2.4g  Torque_old: %-2.4g Err_v: %-2.4g Err_v_old: %-2.4g Ts: %-2.4g\n ",torque[0],torque_old[0],err_v[0],err_v_old[0],Ts);
+            }
         } else {
             if (reset_flag==0) {
                 reset_flag = 1;
             }
             for (int i = 0; i < 4; ++i) {
                 //Conversione in bit
-                bit_torque[i] = (int)(am_tau.tau_robot[i] / 1.5f * 1000.0f); //*1000
+                bit_torque[i] = (int)(am_tau.tau_robot[i] / 1.5f * 1000.0f);
                 //Limit torque
                 if (bit_torque[i] > 1000)
                     bit_torque[i] = 1000;
@@ -352,9 +324,9 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
         }
         dxl_set_txpacket_length((2+1)*NUM_ACTUATOR+4);
         dxl_txrx_packet();
+
         //Scrittura su uorb
-        orb_publish(ORB_ID(csi), csi_pub_fd, &csi);
-        orb_publish(ORB_ID(csi_dot), csi_dot_pub_fd, &csi_dot);
+        orb_publish(ORB_ID(dynamixel_state), dynamixel_state_pub_fd, &dynamixel_state);
 	}
 
 	dxl_write_word(254,32,0);
