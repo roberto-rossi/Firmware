@@ -1298,10 +1298,10 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
     am_rpy_sp = R_sp.to_euler();
 
 
-    am_phi_xy_r(0)= _csi.csi[3]; //am_rpy_sp(0); //_csi.csi[3];
+    am_phi_xy_r(0)= am_rpy_sp(0); //_csi.csi[3];
     am_phi_xy_r(1)= 0.0f; //am_rpy_sp(1); //_csi.csi[4];
 
-    omega_xy_r(0)= _ctrl_state.roll_rate; // _rates_sp(0);//_ctrl_state.roll_rate;
+    omega_xy_r(0)= _rates_sp(0);//_ctrl_state.roll_rate;
     omega_xy_r(1)= 0.0f; //_rates_sp(1);//_ctrl_state.pitch_rate;
 
     alpha_p = alpha_p0 - beta_p;

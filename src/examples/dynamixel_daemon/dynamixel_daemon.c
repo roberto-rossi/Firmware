@@ -196,10 +196,10 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     float q_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
     float q_dot_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
     double Ts = 0.02;
-    const float  c_dev = 60.0f;
-    const double Kpp =  6;
-    const double Kpv =  0.3;
-    const double Kiv =  1.2;
+    const float  c_dev = 60.0f; //60;
+    const double Kpp =  1;   //3.0000    0.4048    0.6326S
+    const double Kpv =  0.29;
+    const double Kiv =  0.46;//1.2;
     int bit_torque[5];
     int reset_flag = 1;
 
@@ -250,7 +250,8 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
                 res = dxl_initialize(1,9);
             } else {
                 dynamixel_state.q[k-1]=((float)state[0]-512)/195.5696f;
-                dynamixel_state.q_dot[k-1]=(q_dot_old[k-1]+c_dev*(dynamixel_state.q[k-1]-q_old[k-1]))/((float)Ts*c_dev+1);
+                dynamixel_state.q_dot[k-1]=(q_dot_old[k-1]+c_dev*(dynamixel_state.q[k-1]-q_old[k-1]))/((float)Ts*c_dev+1); //NON ESEGUITA!
+                dynamixel_state.q_dot[k-1] = (dynamixel_state.q[k-1] - q_old[k-1])/(float)Ts;
                 q_old[k-1] = dynamixel_state.q[k-1];
                 q_dot_old[k-1] = dynamixel_state.q_dot[k-1];
             }
@@ -279,14 +280,17 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
                 err_v[i] = err_pos[i]*Kpp + (double)csi_r_dot.csi_r_dot[i+6] - (double)dynamixel_state.q_dot[i];
                 //Controllore PI discretizzato con EI
                 torque[i] = torque_old[i] + (err_v[i]-err_v_old[i])*Kpv + err_v[i]*Ts*Kiv;
+                if (i == 3)
+                    torque[i] = torque_old[i] + (err_v[i]-err_v_old[i])*Kpv*0.5 + err_v[i]*Ts*Kiv;
+                //torque[i] = (double)csi_r_dot.csi_r_dot[i+6];
+                //Limit torque 1.5 Nm
+                if (torque[i] > 1.4)
+                    torque[i] = 1.4;
+                if (torque[i] < -1.4)
+                    torque[i] = -1.4;
                 //Salvo per passo successivo
                 torque_old[i]=torque[i];
                 err_v_old[i]=err_v[i];
-                //Limit torque 1.5 Nm
-                if (torque[i] > 1.0)
-                    torque[i] = 1.0;
-                if (torque[i] < -1.0)
-                    torque[i] = -1.0;
                 //Conversione in bit
                 bit_torque[i] = (int)(torque[i] / 1.5 * 1000); //*1000
                 if (bit_torque[i]< 0)
