@@ -65,6 +65,8 @@
 #include <drivers/drv_hrt.h>
 #include <arch/board/board.h>
 
+#include "matrix/Matrix.hpp"
+
 #include <uORB/topics/manual_control_setpoint.h>
 #include <uORB/topics/actuator_controls.h>
 #include <uORB/topics/vehicle_rates_setpoint.h>
@@ -323,6 +325,12 @@ private:
 	 * Shim for calling task_main from task_create.
 	 */
 	static void	task_main_trampoline(int argc, char *argv[]);
+
+	/** RR* compute tau arm and F quad
+	*/
+	void         compute_tautbeta();
+	/** RR* ...............
+	*/
 
 	/**
 	 * Main sensor collection task.
@@ -908,14 +916,9 @@ MulticopterPositionControl::cross_sphere_line(const math::Vector<3> &sphere_c, f
 
 void MulticopterPositionControl::control_auto(float dt)
 {
-	/* reset position setpoint on AUTO mode activation or when reentering MC mode */
-	if (!_mode_auto || _vehicle_status.in_transition_mode || !_vehicle_status.is_rotary_wing) {
+	if (!_mode_auto) {
 		_mode_auto = true;
-
-		if (_vehicle_status.in_transition_mode || !_vehicle_status.is_rotary_wing) {
-			_reset_pos_sp = true;
-			_reset_alt_sp = true;
-		}
+		/* reset position setpoint on AUTO mode activation */
 		reset_pos_sp();
 		reset_alt_sp();
 		/* set current velocity as last target velocity to smooth out transition */
@@ -1076,7 +1079,7 @@ void MulticopterPositionControl::control_auto(float dt)
 			_att_sp.yaw_body = _pos_sp_triplet.current.yaw;
 		}
 
-		/* 
+		/*
 		 * if we're already near the current takeoff setpoint don't reset in case we switch back to posctl.
 		 * this makes the takeoff finish smoothly.
 		 */
@@ -1365,10 +1368,9 @@ MulticopterPositionControl::task_main()
 					_vel_sp(2) = _params.land_speed;
 				}
 
-				/* special thrust setpoint generation for takeoff from ground */
+				/* velocity handling during takeoff */
 				if (!_control_mode.flag_control_manual_enabled && _pos_sp_triplet.current.valid
-				    && _pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_TAKEOFF
-				    && _control_mode.flag_armed) {
+				    && _pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_TAKEOFF) {
 
 					// check if we are not already in air.
 					// if yes then we don't need a jumped takeoff anymore
@@ -1479,7 +1481,18 @@ MulticopterPositionControl::task_main()
 
 					/* thrust vector in NED frame */
 					// TODO?: + _vel_sp.emult(_params.vel_ff)
-					math::Vector<3> thrust_sp = vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) + thrust_int;
+
+
+					// RR* .............
+
+					// RR* RICORDA!! cambiare params.vel_p, _params.vel_d, e integrale!
+					// actuators_control = D * (thrust,t_roll,t_pitch,t_yaw)+b. D = diag(d11,d22,d33,d44).
+                    float ControlToActControl_T = 1.92e-02;// b = zeros(4,1);
+                    float Mass_quadrotor = 2.4259; // no battery
+					math::Vector<3> thrust_sp = ( vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) )*Mass_quadrotor*ControlToActControl_T + thrust_int; // DA PENSARE SE AGGIUNGERE GRAVITA'!!!
+					//math::Vector<3> AM_Thrust = vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) + thrust_int;
+
+                    // RR* .............
 
 					if (_pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_TAKEOFF
 							&& !_takeoff_jumped && !_control_mode.flag_control_manual_enabled) {
@@ -1637,19 +1650,22 @@ MulticopterPositionControl::task_main()
 					}
 
 					/* update integrals */
+
+					// RR* .............
 					if (_control_mode.flag_control_velocity_enabled && !saturation_xy) {
-						thrust_int(0) += vel_err(0) * _params.vel_i(0) * dt;
-						thrust_int(1) += vel_err(1) * _params.vel_i(1) * dt;
+						thrust_int(0) += ControlToActControl_T * Mass_quadrotor * vel_err(0) * _params.vel_i(0) * dt;
+						thrust_int(1) += ControlToActControl_T * Mass_quadrotor * vel_err(1) * _params.vel_i(1) * dt;
 					}
 
 					if (_control_mode.flag_control_climb_rate_enabled && !saturation_z) {
-						thrust_int(2) += vel_err(2) * _params.vel_i(2) * dt;
+						thrust_int(2) += ControlToActControl_T * Mass_quadrotor * vel_err(2) * _params.vel_i(2) * dt;
 
 						/* protection against flipping on ground when landing */
 						if (thrust_int(2) > 0.0f) {
 							thrust_int(2) = 0.0f;
 						}
 					}
+					// RR* .............
 
 					/* calculate attitude setpoint from thrust vector */
 					if (_control_mode.flag_control_velocity_enabled) {
@@ -1886,7 +1902,7 @@ MulticopterPositionControl::start()
 	_control_task = px4_task_spawn_cmd("mc_pos_control",
 					   SCHED_DEFAULT,
 					   SCHED_PRIORITY_MAX - 5,
-					   1900,
+					   1500,
 					   (px4_main_t)&MulticopterPositionControl::task_main_trampoline,
 					   nullptr);
 
@@ -1897,6 +1913,96 @@ MulticopterPositionControl::start()
 
 	return OK;
 }
+
+/** RR* ....................*/
+
+void MulticopterPositionControl::compute_tautbeta()
+{
+/** Prende in ingresso: u_tbeta (risultato del P-PI), g,B,Bt_tb_i,Bb_tb_i,Bb_tb_i_pinv */
+
+/** Input: */
+    /** Da ORB */
+    matrix::Vector<float,10> am_g_eta;
+    matrix::Matrix<float,10,10> am_B_eta;
+    matrix::Matrix<float,8,2> am_Bt_tb_i;
+    matrix::Matrix<float,8,6> am_Bb_tb_i;
+    matrix::Matrix<float,6,8> am_Bb_tb_i_pinv;
+
+    /** Da Funzione principale*/
+    matrix::Vector<float,8> am_u_tbeta;
+
+/** Submatrices: */
+    matrix::Matrix<float,3,8> am_B_tz_tb;
+    matrix::Matrix<float,8,8> am_B_tb_i;
+    matrix::Vector<float,2> am_g_t;
+    matrix::Vector<float,3> am_g_tz;
+
+/** Intermediate variables: */
+    matrix::Vector<float,8> am_effec_tau;
+
+/** Output: */
+    matrix::Vector<float,6> am_tau_beta_in;
+    matrix::Vector<float,3> am_Fxy;
+    matrix::Vector<float,8> am_tb_ast;
+
+/** Create Submatrices: */
+    /** am_B_tz_tb */
+    int ii = 0;
+    int jj = 0;
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 10; j++) {
+            if(i != 2 && j != 2 && j!= 3){
+                am_B_tz_tb(ii,jj) = am_B_eta(i,j);
+                ii++;
+                jj++;
+            }
+        }
+    }
+    /** am_B_tb_i; */
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+            if(j<2){
+                am_B_tb_i(i,j) = am_Bt_tb_i(i,j);
+            }
+            else{
+                am_B_tb_i(i,j) = am_Bb_tb_i(i,j-2);
+            }
+        }
+    }
+    /** am_g_t e am_g_tz; */
+    ii = 0;
+    for (int i = 0; i < 8; i++) {
+        if(i<2){
+            am_g_t(i) = am_g_eta(i);
+        }
+        if(i!=2){
+            am_g_tz(ii) = am_g_eta(i);
+            ii++;
+        }
+    }
+
+/** Calcola le Forze di riferimento Fx, e Fy (e Fz temporanea) con B, g e u. */
+    am_Fxy = am_B_tz_tb*am_u_tbeta + am_g_tz;
+
+/** Calcola le tau_beta_in con Bb_tb_i, Bb_tb_i_pinv, g. */
+    am_tau_beta_in = am_Bb_tb_i_pinv*(am_u_tbeta + am_Bt_tb_i*am_g_t);
+
+    /** am_effec_tau; */
+    for (int i = 0; i < 8; i++) {
+        if(i<2){
+            am_effec_tau(i) = -am_g_t(i);
+        }
+        else{
+            am_effec_tau(i) = am_tau_beta_in(i-2);
+        }
+    }
+
+/** Calcola le tb_ast con Bb_tb_i, Bt_tb_i, g, tau_beta_in. */
+    am_tb_ast = am_B_tb_i*am_effec_tau;
+
+}
+
+/** RR* ....................*/
 
 int mc_pos_control_main(int argc, char *argv[])
 {

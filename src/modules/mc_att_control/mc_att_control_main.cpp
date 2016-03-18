@@ -90,6 +90,8 @@
 #include <lib/geo/geo.h>
 #include <lib/tailsitter_recovery/tailsitter_recovery.h>
 
+#include "matrix/Matrix.hpp"
+
 /**
  * Multicopter attitude control app start / stop handling function
  *
@@ -271,6 +273,7 @@ private:
 	 */
 	void		control_attitude_rates(float dt);
 
+    void        compute_final_torques();
 	/**
 	 * Check for vehicle status updates.
 	 */
@@ -749,16 +752,45 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
 	/* angular rates error */
 	math::Vector<3> rates_err = _rates_sp - rates;
-	_att_control = _params.rate_p.emult(rates_err) + _params.rate_d.emult(_rates_prev - rates) / dt + _rates_int +
+
+
+	// RR* ....................
+
+	math::Vector<3> ControlToActControl_tau(6.53e-02,1.624e-01,5.376e-01);
+
+	// MASS!
+	math::Vector<3> _att_control_acc_pd = _params.rate_p.emult(rates_err) +  _params.rate_d.emult(_rates_prev - rates) / dt +
 		       _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
+
+    // PER IL CONTROLLO CON BRACCIO, QUi SOMMARE TUTTE LE COPPIE POSSIBILI =)
+
+	math::Vector<3> Bww_r1(0.0429,0,0); math::Vector<3> Bww_r2(0,0.0269,0); math::Vector<3> Bww_r3(0,0,0.0721);
+    math::Matrix<3,3> Bww; Bww.set_row(0,Bww_r1); Bww.set_row(1,Bww_r2); Bww.set_row(2,Bww_r3);
+
+	math::Vector<3> _att_control_pd = ControlToActControl_tau.emult(Bww*_att_control_acc_pd);
+
+    // E METTERLE QUI
+
+	_att_control = _att_control_pd  + _rates_int ;
+
 	_rates_sp_prev = _rates_sp;
 	_rates_prev = rates;
 
 	/* update integral only if not saturated on low limit and if motor commands are not saturated */
 	if (_thrust_sp > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
+
+        math::Vector<3> _att_control_acc_i =  _params.rate_i.emult(rates_err) * dt;
+
 		for (int i = 0; i < 3; i++) {
 			if (fabsf(_att_control(i)) < _thrust_sp) {
-				float rate_i = _rates_int(i) + _params.rate_i(i) * rates_err(i) * dt;
+                //float rate_i = _rates_int(i) +  _params.rate_i(i) * rates_err(i) * dt;
+				//float rate_i = _rates_int(i) + ControlToActControl_tau(i) * _params.rate_i(i) * rates_err(i) * dt;
+				float rate_i = _rates_int(i);
+				for (int j = 0; j < 3; j++) {
+                     rate_i += ControlToActControl_tau(i) * (Bww(i,j)*_att_control_acc_i(j));
+                }
+
+	// RR* ....................
 
 				if (PX4_ISFINITE(rate_i) && rate_i > -RATES_I_LIMIT && rate_i < RATES_I_LIMIT &&
 				    _att_control(i) > -RATES_I_LIMIT && _att_control(i) < RATES_I_LIMIT) {
@@ -773,6 +805,101 @@ void
 MulticopterAttitudeControl::task_main_trampoline(int argc, char *argv[])
 {
 	mc_att_control::g_control->task_main();
+}
+
+void
+MulticopterAttitudeControl::compute_final_torques()
+/** oppure: void compute_final_torques(int argc, char *argv[])
+*/
+{
+/** Ho B_csi, g_csi, T_bw. Dentro la funzione mi si deve passare tau_b_inertia,beta_dot_ref, omega_dot_ref_xy
+*/
+
+/** Input: */
+    /** Da ORB */
+
+    matrix::Vector<float,10> am_g_eta;//(0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0);
+    matrix::Matrix<float,10,10> am_B_eta;//(0,0,0,0,0,0,0,0,0,0);
+    matrix::Matrix<float,6,2> am_T_betaw;
+    /** Da Funzione principale*/
+    matrix::Vector<float,6> am_tau_beta_in;
+    matrix::Vector<float,6> am_beta_dot_ref;
+    matrix::Vector<float,2> am_omega_xy_dot_ref;
+
+/** Submatrices: */
+    matrix::Vector<float,2> am_g_w;//(0,0,0,0,0,0,0,0,0,0);
+    matrix::Vector<float,6> am_g_beta;//(0,0,0,0,0,0,0,0,0,0);
+    matrix::Matrix<float,2,2> am_B_ww;// am_B_ww.set_row(0,Bww_r1); am_B_ww.set_row(1,Bww_r2); am_B_ww.set_row(2,Bww_r3);
+    matrix::Matrix<float,6,2> am_B_betaw;
+    matrix::Matrix<float,2,6> am_B_wbeta;
+
+/** Intermediate variables: */
+    matrix::Vector<float,6> am_tau_beta;
+    matrix::Vector<float,2> am_tau_omega_xy;
+    matrix::Matrix<float,2,6> am_T_betaw_t;
+    matrix::Vector<float,2> am_tau_omega_in;
+
+/** Output: */
+    //float am_Thrust; DA DECOMMENTARE!!
+    matrix::Vector<float,3> am_tau_quad;
+    matrix::Vector<float,4> am_tau_robot;
+
+/** Extract Submatrices: */
+    //C_betav =
+    //C_wv =
+    for (int j = 4; j < 10; j++) {
+        am_g_beta(j-4) = am_g_eta(j);
+    }
+    for (int j = 2; j < 4; j++) {
+        am_g_w(j-2) = am_g_eta(j);
+    }
+    for (int i = 2; i < 4; i++) {
+        for (int j = 2; j < 4; j++) {
+            am_B_ww(i-2,j-2) = am_B_eta(i,j);
+        }
+    }
+    for (int i = 4; i < 10; i++) {
+        for (int j = 2; j < 4; j++) {
+            am_B_betaw(i-4,j-2) = am_B_eta(i,j);
+            am_B_wbeta(j-2,i-4) = am_B_eta(i,j);
+        }
+    }
+
+//    for (int i = 0; i < 6; i++) {
+//        am_tau_betaw(i) = 0.0;
+//    }
+//    for (int i = 0; i < 6; i++) {
+//        for (int j = 0; j < 2; j++) {
+//            am_B_betaw(i,j) = 0.0;
+//        }
+//    }
+//    for (int i = 0; i < 2; i++) {
+//        am_omega_xy_dot_ref(i) = 0.0;
+//    }
+
+    /** Tau_beta = tau_b_inertia + (C_betav + g_beta) + (B_betaw * omega_dot_ref) */
+    am_tau_beta = am_g_beta + am_tau_beta_in + am_B_betaw*am_omega_xy_dot_ref;
+
+    /** Tau_omega_xy = (B_ww * omega_dot_ref_xy) + (B_wbeta * beta_dot_ref) + (C_wv + g_w) */
+    am_tau_omega_xy = am_B_ww*am_omega_xy_dot_ref + (am_B_wbeta*am_beta_dot_ref) +  am_g_w;
+
+
+    am_T_betaw_t = am_T_betaw.transpose();
+
+    /** Restituisce tau_quad, Thrust, Tau_robot*/
+    //am_Thrust       =   am_tau_beta(0); DA DECOMMENTARE!!
+    am_tau_quad(2)  =   am_tau_beta(1);
+    am_tau_quad(0)  =   am_tau_omega_xy(0);
+    am_tau_quad(1)  =   am_tau_omega_xy(1);
+    /** Tau_omega_xy_0 = Tau_omega_xy + T_bw^T * Tau_beta; */
+    for (int j = 0; j < 6; j++) {
+        am_tau_quad(0) += am_T_betaw_t(0,j)*am_tau_beta(j);
+        am_tau_quad(1) += am_T_betaw_t(1,j)*am_tau_beta(j);
+    }
+    for (int j = 0; j < 4; j++) {
+        am_tau_robot(j) = am_tau_beta(j+2);
+    }
+
 }
 
 void
@@ -813,7 +940,7 @@ MulticopterAttitudeControl::task_main()
 
 		/* this is undesirable but not much we can do - might want to flag unhappy status */
 		if (pret < 0) {
-			warn("mc att ctrl: poll error %d, %d", pret, errno);
+			warn("poll error %d, %d", pret, errno);
 			/* sleep a bit before next try */
 			usleep(100000);
 			continue;
