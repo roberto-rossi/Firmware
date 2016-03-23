@@ -234,6 +234,8 @@ private:
 	bool _alt_hold_engaged;
 	bool _run_pos_control;
 	bool _run_alt_control;
+//GM*
+	bool reset_int_flag;
 
 	math::Vector<3> _pos;
 	math::Vector<3> _pos_sp;
@@ -849,12 +851,12 @@ MulticopterPositionControl::control_offboard(float dt)
 			/* control position */
 			_pos_sp(0) = _pos_sp_triplet.current.x;
 			_pos_sp(1) = _pos_sp_triplet.current.y;
-
+		//printf("control position");
 		} else if (_control_mode.flag_control_velocity_enabled && _pos_sp_triplet.current.velocity_valid) {
 			/* control velocity */
 			/* reset position setpoint to current position if needed */
 			reset_pos_sp();
-
+		//printf("control velocity");
 			/* set position setpoint move rate */
 			_vel_sp(0) = _pos_sp_triplet.current.vx;
 			_vel_sp(1) = _pos_sp_triplet.current.vy;
@@ -872,6 +874,8 @@ MulticopterPositionControl::control_offboard(float dt)
 		if (_control_mode.flag_control_altitude_enabled && _pos_sp_triplet.current.position_valid) {
 			/* Control altitude */
 			_pos_sp(2) = _pos_sp_triplet.current.z;
+		//printf("CONTROL ALTITUDE");
+
 
 		} else if (_control_mode.flag_control_climb_rate_enabled && _pos_sp_triplet.current.velocity_valid) {
 			/* reset alt setpoint to current altitude if needed */
@@ -881,6 +885,8 @@ MulticopterPositionControl::control_offboard(float dt)
 			_vel_sp(2) = _pos_sp_triplet.current.vz;
 
 			_run_alt_control = false; /* request velocity setpoint to be used, instead of position setpoint */
+//printf("CONTROL CLIMB RATE	");
+
 		}
 
 	} else {
@@ -1228,6 +1234,10 @@ MulticopterPositionControl::task_main()
 			_vel_err_d(2) = _vel_z_deriv.update(-_vel(2));
 		}
 
+		if (_control_mode.flag_control_manual_enabled && !reset_int_flag){
+			reset_int_flag=true;
+		}
+
 		if (_control_mode.flag_control_altitude_enabled ||
 		    _control_mode.flag_control_position_enabled ||
 		    _control_mode.flag_control_climb_rate_enabled ||
@@ -1484,14 +1494,30 @@ MulticopterPositionControl::task_main()
 
 
 					// RR* .............
+                  float ControlToActControl_T = 1.92e-02;// b = zeros(4,1);
+                  float Mass_quadrotor = 2.4259; // no battery
+		  float gravity_compensation = -0.7f*9.81f*Mass_quadrotor*ControlToActControl_T;
+					//reset integrale se appena attivato offboard
+					if(_control_mode.flag_control_offboard_enabled){
+						if(reset_int_flag){
+							printf("reset integrale\n");
+							thrust_int(0) = 0.0f;
+							thrust_int(1) = 0.0f;
+							thrust_int(2) = _thrust_sp_prev(2)-gravity_compensation;
+							reset_int_flag=false;
+						}
+					}
 
 					// RR* RICORDA!! cambiare params.vel_p, _params.vel_d, e integrale!
 					// actuators_control = D * (thrust,t_roll,t_pitch,t_yaw)+b. D = diag(d11,d22,d33,d44).
-                    float ControlToActControl_T = 1.92e-02;// b = zeros(4,1);
-                    float Mass_quadrotor = 2.4259; // no battery
-					math::Vector<3> thrust_sp = ( vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) )*Mass_quadrotor*ControlToActControl_T + thrust_int; // DA PENSARE SE AGGIUNGERE GRAVITA'!!!
-					//math::Vector<3> AM_Thrust = vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) + thrust_int;
 
+
+					math::Vector<3> thrust_sp = ( vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) )*Mass_quadrotor*ControlToActControl_T + thrust_int; // DA PENSARE SE AGGIUNGERE GRAVITA'!!!
+					//math::Vector<3> Aprintf("thrust_int e thrust_sp: %-2.4g ****  %-2.4g \n", (double)thrust_int(2), (double)thrust_sp(2));M_Thrust = vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) + thrust_int;
+//GM*
+					thrust_sp(2) += gravity_compensation;//aggiunta gravita
+
+	//printf("thrust_int e thrust_sp: %-2.4g ****  %-2.4g \n", (double)thrust_int(2), (double)thrust_sp(2));
                     // RR* .............
 
 					if (_pos_sp_triplet.current.type == position_setpoint_s::SETPOINT_TYPE_TAKEOFF
@@ -1659,11 +1685,14 @@ MulticopterPositionControl::task_main()
 
 					if (_control_mode.flag_control_climb_rate_enabled && !saturation_z) {
 						thrust_int(2) += ControlToActControl_T * Mass_quadrotor * vel_err(2) * _params.vel_i(2) * dt;
-
+						//printf("thrust_int_+=(2): %-2.4g \n", (double)(ControlToActControl_T * Mass_quadrotor * vel_err(2) * _params.vel_i(2) * dt));
+						//printf("thrust_int_updated(2): %-2.4g \n", (double)thrust_int(2));
 						/* protection against flipping on ground when landing */
-						if (thrust_int(2) > 0.0f) {
-							thrust_int(2) = 0.0f;
+						if (thrust_int(2) > -gravity_compensation) {
+							thrust_int(2) = -gravity_compensation;
 						}
+
+				//printf("vel_err(2): %-2.4g \n", (double)vel_err(2) );
 					}
 					// RR* .............
 
