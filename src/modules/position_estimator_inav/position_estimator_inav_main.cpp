@@ -80,6 +80,7 @@
 
 //aggiunta
 //#include <px4_eigen.h>
+#include "matrix/Matrix.hpp"
 
 #define MIN_VALID_W 0.00001f
 #define PUB_INTERVAL 10000	// limit publish rate to 100 Hz
@@ -115,6 +116,9 @@ static inline int max(int val1, int val2)
 	return (val1 > val2) ? val1 : val2;
 }
 
+void kalman_correction(math::Matrix<2, 2> C_in, float e1, float e2, math::Matrix<2, 2> R, int xyz, float x_cap[3], int dim_case);
+
+void kalman_prediction( math::Matrix<2, 2> P);
 /**
  * Print the correct usage.
  */
@@ -126,6 +130,105 @@ static void usage(const char *reason)
 
 	PX4_INFO("usage: position_estimator_inav {start|stop|status} [-v]\n");
 	return;
+}
+
+//variabili Kalman
+	math::Matrix<2, 2> P_x;// P_x.identity(); P_x=P_x*1000;
+	math::Matrix<2, 2> P_y;// P_y.identity(); P_y=P_y*1000;
+	math::Matrix<2, 2> P_z;// P_z.identity(); P_z=P_z*1000;
+//	math::Matrix<2, 2> K_x;// K_x.identity(); P_x=P_x*1000;
+//	math::Matrix<2, 2> K_y;// K_y.identity(); P_y=P_y*1000;
+//	math::Matrix<2, 2> K_z;// K_z.identity(); P_z=P_z*1000;
+	math::Matrix<2, 2> C_vision;// C_vision.identity();
+	math::Matrix<2, 2> C_sonar;// C_sonar.identity();
+	math::Matrix<2, 2> C_flow;// C_flow.identity();
+	math::Matrix<2, 2> A_process;// A_process.identity();A_process(0,1)=0.01;
+
+	math::Matrix<2, 2> R_vision;// C_vision.identity();
+	math::Matrix<2, 2> R_sonar;// C_sonar.identity();
+	math::Matrix<2, 2> R_flow;// C_flow.identity();
+	math::Matrix<2, 2> Q_sistema;// C_vision.identity();
+
+bool nuovo_dato_camera=false;
+bool nuovo_dato_flow=false;
+bool nuovo_dato_sonar=false;
+
+//	math::Matrix<2, 1> error_to_kalman;// C_flow.identity();
+//	math::Matrix<2, 1> x_cap;
+
+static void init_kalman(int w){
+	P_x.identity(); P_x=P_x*w;
+	P_y.identity(); P_y=P_y*w;
+	P_z.identity(); P_z=P_z*w;
+	C_vision.identity();C_vision(1,1)=0.0f;
+	C_sonar.identity();C_sonar(1,1)=0.0f;
+	C_flow.identity();C_flow(0,0)=0.0f;
+		A_process.identity();A_process(0,1)=0.0f;//0.01;
+	R_vision=C_vision;R_vision(0,0)=0.0009f;//R_vision(1,1)=0.002;
+	R_sonar=C_sonar;R_sonar(0,0)=0.02f;
+	R_flow=C_flow;R_flow(1,1)=0.02f;
+	Q_sistema.identity();Q_sistema(0,0)=0.025f;Q_sistema(1,1)=0.2f;
+}
+
+void kalman_correction(math::Matrix<2, 2> C_in, float e1, float e2, math::Matrix<2, 2> R, int xyz, float x_cap[2], int dim_case){
+math::Matrix<2, 2> P;
+	if(xyz == 1){//x
+	P=P_x;
+	}
+	if(xyz == 2){//y
+	P=P_y;
+	}
+	if(xyz == 3){//z
+	P=P_z;
+	}
+	if(dim_case == 1){//solo misura di posizione
+		math::Matrix<1, 2> C; C(0,0)=C_in(0,0);C(0,1)=C_in(0,1);
+		math::Matrix<2, 1> K;
+		K(0,0) = P(0,0)/(P(0,0) + R(0,0));//2x2 * 2x1 ()
+		K(1,0) = P(1,0)/(P(0,0) + R(0,0));//2x2 * 2x1 ()
+		x_cap[0] += K(0,0) * e1;
+		x_cap[1] += K(1,0) * e1;
+//		P(0,0)-=K(0,0)*(P(0,0));//2x1 1x2 2x2
+//		P(0,1)-=K(0,0)*(P(0,1));//2x1 1x2 2x2
+//		P(1,0)-=K(1,0)*(P(0,0));//2x1 1x2 2x2
+//		P(1,1)-=K(1,0)*(P(0,1));//2x1 1x2 2x2
+		P-=K*C*P;//2x1 1x2 2x2
+	}
+	if(dim_case == 2){//solo misura di velocita
+		math::Matrix<1, 2> C; C(0,0)=C_in(1,0);C(0,1)=C_in(1,1);
+		math::Matrix<2, 1> K;
+		K(0,0) = P(0,1)/(P(1,1) + R(1,1));//2x2 * 2x1 ()
+		K(1,0) = P(1,1)/(P(1,1) + R(1,1));//2x2 * 2x1 ()
+		x_cap[0] += K(0,0) * e2;
+		x_cap[1] += K(1,0) * e2;
+		P-=K*C*P;//2x1 1x2 2x2
+	}
+	if(dim_case == 3){//entrambe
+		math::Matrix<2, 2> C; C=C_in;
+		math::Matrix<2, 2> K;
+		K=P*C.transposed()*(C*P*C.transposed() + R).inversed();//2x2 * 2x1 ()
+		x_cap[0] += K(0,0) * e1 + K(0,1) * e2;
+		x_cap[1] += K(1,0) * e1 + K(1,1) * e2;
+		P-=K*C*P;
+	}
+
+	if(xyz == 1){//x
+	P_x=P;
+	}
+	if(xyz == 2){//y
+	P_y=P;
+	}
+	if(xyz == 3){//z
+	P_z=P;
+	}
+//	K=P*C.transposed()*(C*P*C.transposed() + R).inversed();//2x2 * 2x1 ()
+//	x_cap[0] += K(0,0) * e1 + K(0,1) * e2;
+//	x_cap[1] += K(1,0) * e1 + K(1,1) * e2;
+//	P-=K*C*P;
+}
+
+void kalman_prediction( math::Matrix<2, 2> P){
+	P = A_process * P * A_process.transposed() + Q_sistema;
 }
 
 /**
@@ -157,7 +260,7 @@ int position_estimator_inav_main(int argc, char *argv[])
 
 		thread_should_exit = false;
 		position_estimator_inav_task = px4_task_spawn_cmd("position_estimator_inav",
-					       SCHED_DEFAULT, SCHED_PRIORITY_MAX - 5, 5300,
+					       SCHED_DEFAULT, SCHED_PRIORITY_MAX - 5, 5300,//5300,
 					       position_estimator_inav_thread_main,
 					       (argv && argc > 2) ? (char *const *) &argv[2] : (char *const *) NULL);
 		return 0;
@@ -363,6 +466,10 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 	float vel_comp[] = { 0.0f, 0.0f, 0.0f };
 	float vel_comp_b[] = { 0.0f, 0.0f, 0.0f };
     hrt_abstime last_vision_time = 0;
+
+//dichiarazione kalman
+init_kalman(1);
+
 
 	/* declare and safely initialize all structs */
 	struct actuator_controls_s actuator;
@@ -575,7 +682,7 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 
 					//aggiungo il valore dell'offset in z del sonar
 //MODIFICA: tolta la dipendenza dal parametro params.lidar_calibration_offset che non è disponibile in qgroundcontrol
-					flow.ground_distance_m +=flow_module_offset_z;// params.lidar_calibration_offset;
+					float dist_con_offset = flow.ground_distance_m +flow_module_offset_z;//params.lidar_calibration_offset;
 
 //mavlink_log_info(mavlink_fd, "[Giulio] SONAR: nel range: dist corretta: %.1f",(double)flow.ground_distance_m);
 //MODIFICA
@@ -592,20 +699,24 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 //MODIFICA: nel pitch c'è da compensare il braccio -> +params.flow_module_offset_y*sin(angolo_pitch)
 
 					 //vertical distance
-					dist_ground = flow.ground_distance_m * PX4_R(att.R, 2, 2) + params.flow_module_offset_y*sonar_pitch_correction;
+					dist_ground = dist_con_offset * PX4_R(att.R, 2, 2)+params.flow_module_offset_y*sonar_pitch_correction;
 //mavlink_log_info(mavlink_fd, "[Giulio] SONAR: dist corretta: %.4f",(double)dist_ground);				
+//printf("dist_ground: %-2.4g \n", (double)dist_ground);
+//printf("PX4_R22: %-2.4g \n", (double)PX4_R(att.R, 2, 2));
+//printf("sonar_pitch_correction: %-2.4g \n", (double)sonar_pitch_correction);
+//printf("dist_con_offset_corretto: %-2.4g \n", (double)(dist_con_offset * PX4_R(att.R, 2, 2)));
 
 					if (sonar_first) {
 						sonar_first = false;
 						sonar_offset = dist_ground + z_est[0];
-						mavlink_log_info(mavlink_fd, "[inav] SONAR: new ground offset");
-						warnx("[inav] SONAR: new ground offset");
+						//mavlink_log_info(mavlink_fd, "[inav] SONAR: new ground offset");
+						//warnx("[inav] SONAR: new ground offset");
 						//aggiunta
-						z_est[0]=-dist_ground;
+						//z_est[0]=-dist_ground;
 					}
 
 //AGGIUNTO
-//sonar_offset=0.0f;
+sonar_offset=0.0f;
 
 					corr_sonar = sonar_offset - dist_ground - z_est[0];
 //modifica
@@ -627,6 +738,7 @@ qualcosa tipo se il modulo di z > 10m lo assegnamo a sonar (può succedere solo 
 					} else {
 						corr_sonar = sonar_offset - dist_ground - z_est[0];
 						sonar_valid = true;
+						nuovo_dato_sonar=true;
 						sonar_offset_count = 0;
 						sonar_valid_time = t;
 //aggiunto
@@ -644,10 +756,10 @@ qualcosa tipo se il modulo di z > 10m lo assegnamo a sonar (può succedere solo 
 					flow_time = t;
 					float flow_q = flow.quality / 255.0f;
 					float dist_bottom = flow.ground_distance_m;
-
+//printf("dist_bottom: %-2.4g \n", (double)dist_bottom);
 					if (dist_bottom > flow_min_dist && flow_q > params.flow_q_min && PX4_R(att.R, 2, 2) > 0.7f) {
 						/* distance to surface -> non uso dist_ground perche' e' corretta con l'offset */
-						float flow_dist = dist_bottom / PX4_R(att.R, 2, 2); //use this if using sonar
+						float flow_dist = dist_bottom;// / PX4_R(att.R, 2, 2); //use this if using sonar
 						//float flow_dist = dist_bottom; //use this if using lidar
 
 						/* check if flow if too large for accurate measurements */
@@ -788,6 +900,7 @@ qualcosa tipo se il modulo di z > 10m lo assegnamo a sonar (può succedere solo 
 
 						flow_valid = true;
 
+nuovo_dato_flow=true;
 					} else {
 						w_flow = 0.0f;
 						flow_valid = false;
@@ -812,6 +925,9 @@ qualcosa tipo se il modulo di z > 10m lo assegnamo a sonar (può succedere solo 
 //					static float last_vision_x = 0.0f;
 //					static float last_vision_y = 0.0f;
 //					static float last_vision_z = 0.0f;
+
+
+
 
 					/* reset position estimate on first vision update */
 					if (!vision_valid) {
@@ -858,6 +974,8 @@ in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non l
 						spike_vision++;
 					}
 					else{
+//GM*
+nuovo_dato_camera=true;
 						//resetto il contatore se i valori sono accettabili
 						spike_vision=0;
 						/* calculate correction for position */
@@ -892,6 +1010,12 @@ in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non l
 						}
 					}
 					vision_updates++;
+//GM*
+//float appoggio = x_est[0];
+//printf("vision x: %-2.4g \n", (double)vision.x);
+//printf("est x: %-2.4g \n", (double)appoggio);
+//printf("corr vision x: %-2.4g \n", (double)corr_vision[0][0]);
+
 				}
 			}
 
@@ -1173,14 +1297,14 @@ in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non l
 		accel_bias_corr[2] = 0.0f;
 
 		if (use_vision_xy) {
-			accel_bias_corr[0] -= corr_vision[0][0] * w_xy_vision_p * w_xy_vision_p;
-			accel_bias_corr[0] -= corr_vision[0][1] * w_xy_vision_v;
-			accel_bias_corr[1] -= corr_vision[1][0] * w_xy_vision_p * w_xy_vision_p;
-			accel_bias_corr[1] -= corr_vision[1][1] * w_xy_vision_v;
+			accel_bias_corr[0] -= corr_vision[0][0] * 3.0f * 3.0f + 0.0f *w_xy_vision_p * w_xy_vision_p;
+			accel_bias_corr[0] -= corr_vision[0][1] * 0.0f + 0.0f * w_xy_vision_v;
+			accel_bias_corr[1] -= corr_vision[1][0] * 3.0f * 3.0f; //w_xy_vision_p * w_xy_vision_p;
+			accel_bias_corr[1] -= corr_vision[1][1] * 0.0f;//w_xy_vision_v;
 		}
 
 		if (use_vision_z) {
-			accel_bias_corr[2] -= corr_vision[2][0] * w_z_vision_p * w_z_vision_p;
+			accel_bias_corr[2] -= corr_vision[2][0] * 3.0f * 3.0f + 0.0f *w_z_vision_p * w_z_vision_p;
 		}
 
 		/* accelerometer bias correction for MOCAP (use buffered rotation matrix) */
@@ -1238,6 +1362,9 @@ in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non l
 
 		/* inertial filter prediction for altitude */
 		inertial_filter_predict(dt, z_est, acc[2]);
+A_process(0,1)=dt;
+		//kalman_prediction(P_z);
+P_z = A_process * P_z * A_process.transposed() + Q_sistema;
 
 		if (!(PX4_ISFINITE(z_est[0]) && PX4_ISFINITE(z_est[1]))) {
 			write_debug_log("BAD ESTIMATE AFTER Z PREDICTION", dt, x_est, y_est, z_est, x_est_prev, y_est_prev, z_est_prev,
@@ -1247,11 +1374,15 @@ in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non l
 		}
 
 		/* inertial filter correction for altitude */
-		if (use_sonar) {
-			inertial_filter_correct(corr_sonar, dt, z_est, 0, params.w_z_lidar);
-
+		if (use_sonar && nuovo_dato_sonar) {
+//printf("z_est prima_sonar: %-2.4g ****  %-2.4g \n", (double)z_est[0], (double)z_est[1]);
+//			inertial_filter_correct(corr_sonar, dt, z_est, 0, params.w_z_lidar);
+			kalman_correction(C_sonar, corr_sonar, 0, R_sonar, 3, z_est, 1);
+//printf("z_est dopo_sonar: %-2.4g ****  %-2.4g \n", (double)z_est[0], (double)z_est[1]);
+//printf("corr_sonar: %-2.4g \n", (double)corr_sonar);
+			nuovo_dato_sonar=false;
 		} else {
-			inertial_filter_correct(corr_baro, dt, z_est, 0, params.w_z_baro);
+		//	inertial_filter_correct(corr_baro, dt, z_est, 0, params.w_z_baro);
 		}
 
 		if (use_gps_z) {
@@ -1261,9 +1392,10 @@ in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non l
 			inertial_filter_correct(corr_gps[2][1], dt, z_est, 1, w_z_gps_v);
 		}
 
-		if (use_vision_z) {
+		if (use_vision_z && nuovo_dato_camera) {//NOTA BENE nuovo_dato_camera=0 in x e y
 			epv = fminf(epv, epv_vision);
-			inertial_filter_correct(corr_vision[2][0], dt, z_est, 0, w_z_vision_p);
+			//inertial_filter_correct(corr_vision[2][0], dt, z_est, 0, w_z_vision_p);
+			kalman_correction(C_vision, corr_vision[2][0], 0, R_vision, 3, z_est, 1);
 		}
 
 		if (use_mocap) {
@@ -1287,8 +1419,21 @@ in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non l
 
 		if (can_estimate_xy) {
 			/* inertial filter prediction for position */
+//mantenuto, tanto è uguale
+//printf("x_est prima_predict: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
+//P_x.print();
 			inertial_filter_predict(dt, x_est, acc[0]);
 			inertial_filter_predict(dt, y_est, acc[1]);
+//printf("x_est dopo_predict: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
+//P_x.print();
+A_process(0,1)=dt;
+			//kalman_prediction(P_x);
+		P_x = A_process * P_x * A_process.transposed() + Q_sistema;
+//P_x.print();
+
+//			x_cap=y_est;
+//			kalman_prediction(P_y);
+P_y = A_process * P_y * A_process.transposed() + Q_sistema;
 
 			if (!(PX4_ISFINITE(x_est[0]) && PX4_ISFINITE(x_est[1]) && PX4_ISFINITE(y_est[0]) && PX4_ISFINITE(y_est[1]))) {
 				write_debug_log("BAD ESTIMATE AFTER PREDICTION", dt, x_est, y_est, z_est, x_est_prev, y_est_prev, z_est_prev,
@@ -1299,11 +1444,15 @@ in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non l
 			}
 
 			/* inertial filter correction for position */
-			if (use_flow) {
+			if (use_flow && nuovo_dato_flow) {
 				eph = fminf(eph, eph_flow);
-
-				inertial_filter_correct(corr_flow[0], dt, x_est, 1, params.w_xy_flow * w_flow);
-				inertial_filter_correct(corr_flow[1], dt, y_est, 1, params.w_xy_flow * w_flow);
+//printf("x_est prima_flow: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
+//				inertial_filter_correct(corr_flow[0], dt, x_est, 1, params.w_xy_flow * w_flow);
+//				inertial_filter_correct(corr_flow[1], dt, y_est, 1, params.w_xy_flow * w_flow);
+				kalman_correction(C_flow, 0, corr_flow[0]* w_flow, R_flow, 1, x_est, 2);
+				kalman_correction(C_flow, 0, corr_flow[1]* w_flow, R_flow, 2, y_est, 2);
+				nuovo_dato_flow=false;
+//printf("x_est dopo_flow: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
 			}
 
 			if (use_gps_xy) {
@@ -1318,16 +1467,22 @@ in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non l
 				}
 			}
 
-			if (use_vision_xy) {
+			if (use_vision_xy && nuovo_dato_camera) {
 				eph = fminf(eph, eph_vision);
 
-				inertial_filter_correct(corr_vision[0][0], dt, x_est, 0, w_xy_vision_p);
-				inertial_filter_correct(corr_vision[1][0], dt, y_est, 0, w_xy_vision_p);
-
+//				inertial_filter_correct(corr_vision[0][0], dt, x_est, 0, w_xy_vision_p);
+//				inertial_filter_correct(corr_vision[1][0], dt, y_est, 0, w_xy_vision_p);
+//printf("x_est prima: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
+//P_x.print();
+				kalman_correction(C_vision, corr_vision[0][0], 0, R_vision, 1, x_est, 1);
+				kalman_correction(C_vision, corr_vision[1][0], 0, R_vision, 2, y_est, 1);
+//printf("x_est dopo: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
+//P_x.print();
 				if (w_xy_vision_v > MIN_VALID_W) {
-					inertial_filter_correct(corr_vision[0][1], dt, x_est, 1, w_xy_vision_v);
-					inertial_filter_correct(corr_vision[1][1], dt, y_est, 1, w_xy_vision_v);
+//					inertial_filter_correct(corr_vision[0][1], dt, x_est, 1, w_xy_vision_v);
+//					inertial_filter_correct(corr_vision[1][1], dt, y_est, 1, w_xy_vision_v);
 				}
+				nuovo_dato_camera=false;
 			}
 
 			if (use_mocap) {
