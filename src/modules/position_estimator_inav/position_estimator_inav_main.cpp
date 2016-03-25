@@ -164,8 +164,8 @@ static void init_kalman(int w){
 	C_sonar.identity();C_sonar(1,1)=0.0f;
 	C_flow.identity();C_flow(0,0)=0.0f;
 		A_process.identity();A_process(0,1)=0.0f;//0.01;
-	R_vision=C_vision;R_vision(0,0)=0.0009f;//R_vision(1,1)=0.002;
-	R_sonar=C_sonar;R_sonar(0,0)=0.02f;
+	R_vision=C_vision;R_vision(0,0)=0.0001f;R_vision(1,1)=0.2;
+	R_sonar=C_sonar;R_sonar(0,0)=1.0f;
 	R_flow=C_flow;R_flow(1,1)=0.02f;
 	Q_sistema.identity();Q_sistema(0,0)=0.025f;Q_sistema(1,1)=0.2f;
 }
@@ -1362,6 +1362,7 @@ nuovo_dato_camera=true;
 
 		/* inertial filter prediction for altitude */
 		inertial_filter_predict(dt, z_est, acc[2]);
+//		inertial_filter_predict(dt, z_est, 0);
 A_process(0,1)=dt;
 		//kalman_prediction(P_z);
 P_z = A_process * P_z * A_process.transposed() + Q_sistema;
@@ -1395,7 +1396,7 @@ P_z = A_process * P_z * A_process.transposed() + Q_sistema;
 		if (use_vision_z && nuovo_dato_camera) {//NOTA BENE nuovo_dato_camera=0 in x e y
 			epv = fminf(epv, epv_vision);
 			//inertial_filter_correct(corr_vision[2][0], dt, z_est, 0, w_z_vision_p);
-			kalman_correction(C_vision, corr_vision[2][0], 0, R_vision, 3, z_est, 1);
+			kalman_correction(C_vision, corr_vision[2][0], corr_vision[2][1], C_sonar, 3, z_est, 3);//NOTA BENE GM*
 		}
 
 		if (use_mocap) {
@@ -1422,8 +1423,10 @@ P_z = A_process * P_z * A_process.transposed() + Q_sistema;
 //mantenuto, tanto è uguale
 //printf("x_est prima_predict: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
 //P_x.print();
-			inertial_filter_predict(dt, x_est, acc[0]);
-			inertial_filter_predict(dt, y_est, acc[1]);
+//			inertial_filter_predict(dt, x_est, acc[0]);
+//			inertial_filter_predict(dt, y_est, acc[1]);
+			inertial_filter_predict(dt, x_est, 0);
+			inertial_filter_predict(dt, y_est, 0);
 //printf("x_est dopo_predict: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
 //P_x.print();
 A_process(0,1)=dt;
@@ -1474,8 +1477,8 @@ P_y = A_process * P_y * A_process.transposed() + Q_sistema;
 //				inertial_filter_correct(corr_vision[1][0], dt, y_est, 0, w_xy_vision_p);
 //printf("x_est prima: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
 //P_x.print();
-				kalman_correction(C_vision, corr_vision[0][0], 0, R_vision, 1, x_est, 1);
-				kalman_correction(C_vision, corr_vision[1][0], 0, R_vision, 2, y_est, 1);
+				kalman_correction(C_vision, corr_vision[0][0], corr_vision[0][1], R_vision, 1, x_est, 3);
+				kalman_correction(C_vision, corr_vision[1][0], corr_vision[1][1], R_vision, 2, y_est, 3);
 //printf("x_est dopo: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
 //P_x.print();
 				if (w_xy_vision_v > MIN_VALID_W) {
