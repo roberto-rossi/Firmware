@@ -1496,7 +1496,7 @@ MulticopterPositionControl::task_main()
 					// RR* .............
                   float ControlToActControl_T = 1.92e-02;// b = zeros(4,1);
                   float Mass_quadrotor = 2.4259; // no battery
-		  float gravity_compensation = -0.7f*9.81f*Mass_quadrotor*ControlToActControl_T;
+		  float gravity_compensation = -1.0f*9.81f*Mass_quadrotor*ControlToActControl_T;
 					//reset integrale se appena attivato offboard
 					if(_control_mode.flag_control_offboard_enabled){
 						if(reset_int_flag){
