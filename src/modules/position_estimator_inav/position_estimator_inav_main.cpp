@@ -166,7 +166,7 @@ static void init_kalman(int w){
 		A_process.identity();A_process(0,1)=0.0f;//0.01;
 	R_vision=C_vision;R_vision(0,0)=0.0001f;R_vision(1,1)=0.2;
 	R_sonar=C_sonar;R_sonar(0,0)=1.0f;
-	R_flow=C_flow;R_flow(1,1)=0.02f;
+	R_flow=C_flow;R_flow(1,1)=0.2f;
 	Q_sistema.identity();Q_sistema(0,0)=0.025f;Q_sistema(1,1)=0.2f;
 }
 
@@ -1174,7 +1174,8 @@ nuovo_dato_camera=true;
 
 		/* check for timeout on vision topic */
 		if (vision_valid && (t > (vision.timestamp_boot + vision_topic_timeout))) {
-			vision_valid = false;
+			//GM* tolta la possibilità di resettare la stima se perde la camera
+			//vision_valid = false;
 			warnx("VISION timeout");
 			mavlink_log_info(mavlink_fd, "[inav] VISION timeout");
 		}
@@ -1396,7 +1397,7 @@ P_z = A_process * P_z * A_process.transposed() + Q_sistema;
 		if (use_vision_z && nuovo_dato_camera) {//NOTA BENE nuovo_dato_camera=0 in x e y
 			epv = fminf(epv, epv_vision);
 			//inertial_filter_correct(corr_vision[2][0], dt, z_est, 0, w_z_vision_p);
-			kalman_correction(C_vision, corr_vision[2][0], corr_vision[2][1], C_sonar, 3, z_est, 3);//NOTA BENE GM*
+			kalman_correction(C_vision, corr_vision[2][0], corr_vision[2][1], R_vision, 3, z_est, 1);//xyz, x_est, dimC
 		}
 
 		if (use_mocap) {
@@ -1452,8 +1453,9 @@ P_y = A_process * P_y * A_process.transposed() + Q_sistema;
 //printf("x_est prima_flow: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
 //				inertial_filter_correct(corr_flow[0], dt, x_est, 1, params.w_xy_flow * w_flow);
 //				inertial_filter_correct(corr_flow[1], dt, y_est, 1, params.w_xy_flow * w_flow);
-				kalman_correction(C_flow, 0, corr_flow[0]* w_flow, R_flow, 1, x_est, 2);
-				kalman_correction(C_flow, 0, corr_flow[1]* w_flow, R_flow, 2, y_est, 2);
+//GM*
+			//	kalman_correction(C_flow, 0, corr_flow[0]* w_flow, R_flow, 1, x_est, 2);
+			//	kalman_correction(C_flow, 0, corr_flow[1]* w_flow, R_flow, 2, y_est, 2);
 				nuovo_dato_flow=false;
 //printf("x_est dopo_flow: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
 			}
@@ -1477,8 +1479,8 @@ P_y = A_process * P_y * A_process.transposed() + Q_sistema;
 //				inertial_filter_correct(corr_vision[1][0], dt, y_est, 0, w_xy_vision_p);
 //printf("x_est prima: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
 //P_x.print();
-				kalman_correction(C_vision, corr_vision[0][0], corr_vision[0][1], R_vision, 1, x_est, 3);
-				kalman_correction(C_vision, corr_vision[1][0], corr_vision[1][1], R_vision, 2, y_est, 3);
+				kalman_correction(C_vision, corr_vision[0][0], corr_vision[0][1], R_vision, 1, x_est, 3);//xyz, x_est, dimC
+				kalman_correction(C_vision, corr_vision[1][0], corr_vision[1][1], R_vision, 2, y_est, 3);//xyz, y_est, dimC
 //printf("x_est dopo: %-2.4g ****  %-2.4g \n", (double)x_est[0], (double)x_est[1]);
 //P_x.print();
 				if (w_xy_vision_v > MIN_VALID_W) {

@@ -716,7 +716,13 @@ MulticopterAttitudeControl::control_attitude(float dt)
 	}
 
 	/* calculate angular rates setpoint */
-	_rates_sp = _params.att_p.emult(e_R);
+//GM*	
+	math::Vector<3> Kpp;
+	Kpp(0) = 7.0f;
+	Kpp(1) = 7.0f;
+	Kpp(2) = 5.0f;
+	_rates_sp = Kpp.emult(e_R);
+	//_rates_sp = _params.att_p.emult(e_R);
 
 	/* limit rates */
 	for (int i = 0; i < 3; i++) {
@@ -757,10 +763,28 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	// RR* ....................
 
 	math::Vector<3> ControlToActControl_tau(6.53e-02,1.624e-01,5.376e-01);
+	math::Vector<3> Kpv;
+	Kpv(0) = 25.0f;
+	Kpv(1) = 25.0f;
+	Kpv(2) = 25.0f;
+	math::Vector<3> Kiv;
+	Kiv(0) = 46.87f;//62.5f;
+	Kiv(1) = 46.87f;//62.5f;
+	Kiv(2) = 62.5f;
+	math::Vector<3> Kdv;
+	Kdv(0) = 0.0f;
+	Kdv(1) = 0.0f;
+	Kdv(2) = 0.0f;
+	math::Vector<3> Kffv;
+	Kffv(0) = 0.0f;
+	Kffv(1) = 0.0f;
+	Kffv(2) = 0.0f;
 
 	// MASS!
-	math::Vector<3> _att_control_acc_pd = _params.rate_p.emult(rates_err) +  _params.rate_d.emult(_rates_prev - rates) / dt +
-		       _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
+	//math::Vector<3> _att_control_acc_pd = _params.rate_p.emult(rates_err) +  _params.rate_d.emult(_rates_prev - rates) / dt + _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
+
+math::Vector<3> _att_control_acc_pd = Kpv.emult(rates_err) + Kdv.emult(_rates_prev - rates)/dt + Kffv.emult(_rates_sp - _rates_sp_prev) / dt;
+
 
     // PER IL CONTROLLO CON BRACCIO, QUi SOMMARE TUTTE LE COPPIE POSSIBILI =)
 
@@ -779,7 +803,8 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	/* update integral only if not saturated on low limit and if motor commands are not saturated */
 	if (_thrust_sp > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
 
-        math::Vector<3> _att_control_acc_i =  _params.rate_i.emult(rates_err) * dt;
+//        math::Vector<3> _att_control_acc_i =  _params.rate_i.emult(rates_err) * dt;
+        math::Vector<3> _att_control_acc_i =  Kiv.emult(rates_err) * dt;
 
 		for (int i = 0; i < 3; i++) {
 			if (fabsf(_att_control(i)) < _thrust_sp) {
@@ -787,8 +812,8 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 				//float rate_i = _rates_int(i) + ControlToActControl_tau(i) * _params.rate_i(i) * rates_err(i) * dt;
 				float rate_i = _rates_int(i);
 				for (int j = 0; j < 3; j++) {
-                     rate_i += ControlToActControl_tau(i) * (Bww(i,j)*_att_control_acc_i(j));
-                }
+                     			rate_i += ControlToActControl_tau(i) * (Bww(i,j)*_att_control_acc_i(j));
+                		}
 
 	// RR* ....................
 

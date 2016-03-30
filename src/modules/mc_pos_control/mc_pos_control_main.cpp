@@ -88,6 +88,9 @@
 
 #include <controllib/blocks.hpp>
 #include <controllib/block/BlockParam.hpp>
+//GM*
+#include <uORB/topics/csi.h>
+#include <uORB/topics/csi_dot.h>
 
 #define TILT_COS_MAX	0.7f
 #define SIGMA			0.000001f
@@ -141,9 +144,15 @@ private:
 	int		_local_pos_sp_sub;		/**< offboard local position setpoint */
 	int		_global_vel_sp_sub;		/**< offboard global velocity setpoint */
 
+	int		_csi_sub;			/**< csi */
+	int		_csi_dot_sub;			/**< csi_dot */
+
 	orb_advert_t	_att_sp_pub;			/**< attitude setpoint publication */
 	orb_advert_t	_local_pos_sp_pub;		/**< vehicle local position setpoint publication */
 	orb_advert_t	_global_vel_sp_pub;		/**< vehicle global velocity setpoint publication */
+
+	orb_advert_t	_csi_pub;			/**< csi pub */
+	orb_advert_t	_csi_dot_pub;			/**< csi pub */
 
 	orb_id_t _attitude_setpoint_id;
 
@@ -157,6 +166,9 @@ private:
 	struct position_setpoint_triplet_s		_pos_sp_triplet;	/**< vehicle global position setpoint triplet */
 	struct vehicle_local_position_setpoint_s	_local_pos_sp;		/**< vehicle local position setpoint */
 	struct vehicle_global_velocity_setpoint_s	_global_vel_sp;		/**< vehicle global velocity setpoint */
+
+	struct csi_s					_csi;
+	struct csi_dot_s				_csi_dot;
 
 	control::BlockParamFloat _manual_thr_min;
 	control::BlockParamFloat _manual_thr_max;
@@ -362,11 +374,15 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_local_pos_sub(-1),
 	_pos_sp_triplet_sub(-1),
 	_global_vel_sp_sub(-1),
+	_csi_sub(-1),
+	_csi_dot_sub(-1),
 
 	/* publications */
 	_att_sp_pub(nullptr),
 	_local_pos_sp_pub(nullptr),
 	_global_vel_sp_pub(nullptr),
+	_csi_pub(nullptr),
+	_csi_dot_pub(nullptr),
 	_attitude_setpoint_id(0),
 	_manual_thr_min(this, "MANTHR_MIN"),
 	_manual_thr_max(this, "MANTHR_MAX"),
@@ -403,6 +419,9 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	memset(&_global_vel_sp, 0, sizeof(_global_vel_sp));
 
 	memset(&_ref_pos, 0, sizeof(_ref_pos));
+
+	memset(&_csi, 0, sizeof(_csi));
+	memset(&_csi_dot, 0, sizeof(_csi_dot));
 
 	_params.pos_p.zero();
 	_params.vel_p.zero();
@@ -608,6 +627,11 @@ MulticopterPositionControl::poll_subscriptions()
 		_R = q_att.to_dcm();
 		math::Vector<3> euler_angles;
 		euler_angles = _R.to_euler();
+
+//GM*
+		_csi.csi[6]=euler_angles(0);
+		_csi.csi[7]=euler_angles(1);
+		_csi.csi[8]=euler_angles(2);
 		_yaw = euler_angles(2);
 	}
 
@@ -1129,6 +1153,8 @@ MulticopterPositionControl::task_main()
 	_local_pos_sp_sub = orb_subscribe(ORB_ID(vehicle_local_position_setpoint));
 	_global_vel_sp_sub = orb_subscribe(ORB_ID(vehicle_global_velocity_setpoint));
 
+	_csi_sub = orb_subscribe(ORB_ID(csi));
+	_csi_dot_sub = orb_subscribe(ORB_ID(csi_dot));
 
 	parameters_update(true);
 
@@ -1143,6 +1169,10 @@ MulticopterPositionControl::task_main()
 	bool reset_int_xy = true;
 	bool reset_yaw_sp = true;
 	bool was_armed = false;
+
+//err vel vecchio GM*
+//	math::Vector<3> vel_err_old;
+
 
 	hrt_abstime t_prev = 0;
 
@@ -1327,14 +1357,30 @@ MulticopterPositionControl::task_main()
 
 			} else {
 				/* run position & altitude controllers, if enabled (otherwise use already computed velocity setpoints) */
+
+				//GM*	NB la z non è toccata
+				math::Vector<3> Kpp;
+				Kpp(0) = 0.3f;
+				Kpp(1) = 0.3f;
+				Kpp(2) = 0.5f;// _params.pos_p(2);
 				if (_run_pos_control) {
-					_vel_sp(0) = (_pos_sp(0) - _pos(0)) * _params.pos_p(0);
-					_vel_sp(1) = (_pos_sp(1) - _pos(1)) * _params.pos_p(1);
+					//_vel_sp(0) = (_pos_sp(0) - _pos(0)) * _params.pos_p(0);
+					//_vel_sp(1) = (_pos_sp(1) - _pos(1)) * _params.pos_p(1);
+					_vel_sp(0) = (_pos_sp(0) - _pos(0)) * Kpp(0);
+					_vel_sp(1) = (_pos_sp(1) - _pos(1)) * Kpp(1);
 				}
 
 				if (_run_alt_control) {
-					_vel_sp(2) = (_pos_sp(2) - _pos(2)) * _params.pos_p(2);
+					_vel_sp(2) = (_pos_sp(2) - _pos(2)) * Kpp(2);
 				}
+
+//GM*
+			_csi.csi[0]=_pos(0);
+			_csi.csi[1]=_pos(1);
+			_csi.csi[2]=_pos(2);
+			_csi_dot.csi_dot[0]=_pos_sp(0);
+			_csi_dot.csi_dot[1]=_pos_sp(1);
+			_csi_dot.csi_dot[3]=_pos_sp(2);
 
 				/* make sure velocity setpoint is saturated in xy*/
 				float vel_norm_xy = sqrtf(_vel_sp(0) * _vel_sp(0) +
@@ -1488,14 +1534,29 @@ MulticopterPositionControl::task_main()
 
 					/* velocity error */
 					math::Vector<3> vel_err = _vel_sp - _vel;
+//GM* Filtro passabasso
+//					float tau_filtro = 5;
+//					float tau_t = tau_filtro * dt;
+//
+//vel_err=vel_err_u* tau_t/(1+tau_t) + vel_err_old * 1/(1+tau_t);
+//vel_err_old=vel_err;
+//GM*
+			_csi.csi[3]=_vel(0);
+			_csi.csi[4]=_vel(1);
+			_csi.csi[5]=_vel(2);
+			_csi_dot.csi_dot[3]=_vel_sp(0);
+			_csi_dot.csi_dot[4]=_vel_sp(1);
+			_csi_dot.csi_dot[5]=_vel_sp(2);
 
 					/* thrust vector in NED frame */
 					// TODO?: + _vel_sp.emult(_params.vel_ff)
 
 
 					// RR* .............
-                  float ControlToActControl_T = 1.92e-02;// b = zeros(4,1);
+//                  float ControlToActControl_T = 1.92e-02;// b = zeros(4,1); //stimato sensore forza
+                  float ControlToActControl_T = 1.49e-02; //prova
                   float Mass_quadrotor = 2.4259; // no battery
+//                  float Mass_quadrotor = 3.2259; // con battery
 		  float gravity_compensation = -1.0f*9.81f*Mass_quadrotor*ControlToActControl_T;
 					//reset integrale se appena attivato offboard
 					if(_control_mode.flag_control_offboard_enabled){
@@ -1511,8 +1572,27 @@ MulticopterPositionControl::task_main()
 					// RR* RICORDA!! cambiare params.vel_p, _params.vel_d, e integrale!
 					// actuators_control = D * (thrust,t_roll,t_pitch,t_yaw)+b. D = diag(d11,d22,d33,d44).
 
+				//GM*	NB la z non è toccata
+				math::Vector<3> Kpv;
+				Kpv(0) = 1.5f;
+				Kpv(1) = 1.5f;
+				Kpv(2) = 2.5f;//_params.vel_p(2);
+				math::Vector<3> Kiv;
+				Kiv(0) = 0.125f;
+				Kiv(1) = 0.125f;
+				Kiv(2) = 0.625f;//_params.vel_i(2);
+				math::Vector<3> Kdv;
+				Kdv(0) = 0.0f;
+				Kdv(1) = 0.0f;
+				Kdv(2) = 0.0f;
+				math::Vector<3> Kffv;
+				Kffv(0) = 0.0f;
+				Kffv(1) = 0.0f;
+				Kffv(2) = 0.0f;
 
-					math::Vector<3> thrust_sp = ( vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) )*Mass_quadrotor*ControlToActControl_T + thrust_int; // DA PENSARE SE AGGIUNGERE GRAVITA'!!!
+					//math::Vector<3> thrust_sp = ( vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) )*Mass_quadrotor*ControlToActControl_T + thrust_int; // DA PENSARE SE AGGIUNGERE GRAVITA'!!!
+math::Vector<3> thrust_sp = ( vel_err.emult(Kpv) + _vel_err_d.emult(Kdv) )*Mass_quadrotor*ControlToActControl_T + thrust_int;
+
 					//math::Vector<3> Aprintf("thrust_int e thrust_sp: %-2.4g ****  %-2.4g \n", (double)thrust_int(2), (double)thrust_sp(2));M_Thrust = vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) + thrust_int;
 //GM*
 					thrust_sp(2) += gravity_compensation;//aggiunta gravita
@@ -1535,6 +1615,12 @@ MulticopterPositionControl::task_main()
 					if (!_control_mode.flag_control_climb_rate_enabled) {
 						thrust_sp(2) = 0.0f;
 					}
+
+
+//GM*
+			_csi.csi[9]=thrust_sp(0);
+			_csi.csi[10]=thrust_sp(1);
+			_csi_dot.csi_dot[9]=thrust_sp(2);
 
 					/* limit thrust vector and check for saturation */
 					bool saturation_xy = false;
@@ -1679,12 +1765,15 @@ MulticopterPositionControl::task_main()
 
 					// RR* .............
 					if (_control_mode.flag_control_velocity_enabled && !saturation_xy) {
-						thrust_int(0) += ControlToActControl_T * Mass_quadrotor * vel_err(0) * _params.vel_i(0) * dt;
-						thrust_int(1) += ControlToActControl_T * Mass_quadrotor * vel_err(1) * _params.vel_i(1) * dt;
+						thrust_int(0) += ControlToActControl_T * Mass_quadrotor * vel_err(0) * Kiv(0) * dt;
+						thrust_int(1) += ControlToActControl_T * Mass_quadrotor * vel_err(1) * Kiv(1) * dt;
+
+//						thrust_int(0) += ControlToActControl_T * Mass_quadrotor * vel_err(0) * _params.vel_i(0) * dt;
+//						thrust_int(1) += ControlToActControl_T * Mass_quadrotor * vel_err(1) * _params.vel_i(1) * dt;
 					}
 
 					if (_control_mode.flag_control_climb_rate_enabled && !saturation_z) {
-						thrust_int(2) += ControlToActControl_T * Mass_quadrotor * vel_err(2) * _params.vel_i(2) * dt;
+						thrust_int(2) += ControlToActControl_T * Mass_quadrotor * vel_err(2) * Kiv(2) * dt;
 						//printf("thrust_int_+=(2): %-2.4g \n", (double)(ControlToActControl_T * Mass_quadrotor * vel_err(2) * _params.vel_i(2) * dt));
 						//printf("thrust_int_updated(2): %-2.4g \n", (double)thrust_int(2));
 						/* protection against flipping on ground when landing */
@@ -1801,6 +1890,7 @@ MulticopterPositionControl::task_main()
 			_local_pos_sp.vy = _vel_sp(1);
 			_local_pos_sp.vz = _vel_sp(2);
 
+
 			/* publish local position setpoint */
 			if (_local_pos_sp_pub != nullptr) {
 				orb_publish(ORB_ID(vehicle_local_position_setpoint), _local_pos_sp_pub, &_local_pos_sp);
@@ -1903,6 +1993,27 @@ MulticopterPositionControl::task_main()
 		if (!(_control_mode.flag_control_offboard_enabled &&
 		      !(_control_mode.flag_control_position_enabled ||
 			_control_mode.flag_control_velocity_enabled))) {
+
+			_csi_dot.csi_dot[6]=_att_sp.roll_body;
+			_csi_dot.csi_dot[7]=_att_sp.pitch_body;
+			_csi_dot.csi_dot[8]=_att_sp.yaw_body;
+
+			//GM* csi pub
+			if (_csi_pub != nullptr) {
+				orb_publish(ORB_ID(csi), _csi_pub, &_csi);
+
+			} else{
+				_csi_pub = orb_advertise(ORB_ID(csi), &_csi);
+			}
+			if (_csi_dot_pub != nullptr) {
+				orb_publish(ORB_ID(csi_dot), _csi_dot_pub, &_csi_dot);
+
+			} else{
+				_csi_dot_pub = orb_advertise(ORB_ID(csi_dot), &_csi_dot);
+			}
+
+
+
 
 			if (_att_sp_pub != nullptr) {
 				orb_publish(_attitude_setpoint_id, _att_sp_pub, &_att_sp);
