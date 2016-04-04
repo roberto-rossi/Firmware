@@ -459,7 +459,7 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 	float last_vision_y = 0.0f;
 	float last_vision_z = 0.0f;
 	int spike_vision=0;
-	float max_vision_error=1.0; //metri di errore massimo
+	float max_vision_error=0.5; //metri di errore massimo
 	float flow_module_offset_z = 0.06f; //offset in z: 6cm in basso
 	float offset_p4flow[] = { 0.0f, 0.0f, 0.0f };
 	float px4flow_om[] = { 0.0f, 0.0f, 0.0f };

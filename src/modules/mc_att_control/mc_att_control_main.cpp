@@ -764,16 +764,16 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
 	math::Vector<3> ControlToActControl_tau(6.53e-02,1.624e-01,5.376e-01);
 	math::Vector<3> Kpv;
-	Kpv(0) = 25.0f;
-	Kpv(1) = 25.0f;
+	Kpv(0) = 30.0f;
+	Kpv(1) = 30.0f;
 	Kpv(2) = 25.0f;
 	math::Vector<3> Kiv;
-	Kiv(0) = 46.87f;//62.5f;
-	Kiv(1) = 46.87f;//62.5f;
+	Kiv(0) = 40.0f; // 46.87f;//62.5f;
+	Kiv(1) = 40.0f; // 46.87f;//62.5f;
 	Kiv(2) = 62.5f;
 	math::Vector<3> Kdv;
-	Kdv(0) = 0.0f;
-	Kdv(1) = 0.0f;
+	Kdv(0) = 0.0f;//02f;
+	Kdv(1) = 0.0f;//02f;
 	Kdv(2) = 0.0f;
 	math::Vector<3> Kffv;
 	Kffv(0) = 0.0f;

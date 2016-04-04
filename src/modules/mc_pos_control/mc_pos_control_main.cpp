@@ -1360,8 +1360,8 @@ MulticopterPositionControl::task_main()
 
 				//GM*	NB la z non è toccata
 				math::Vector<3> Kpp;
-				Kpp(0) = 0.3f;
-				Kpp(1) = 0.3f;
+				Kpp(0) = 0.2f;//0.3
+				Kpp(1) = 0.2f;
 				Kpp(2) = 0.5f;// _params.pos_p(2);
 				if (_run_pos_control) {
 					//_vel_sp(0) = (_pos_sp(0) - _pos(0)) * _params.pos_p(0);
@@ -1553,8 +1553,8 @@ MulticopterPositionControl::task_main()
 
 
 					// RR* .............
-//                  float ControlToActControl_T = 1.92e-02;// b = zeros(4,1); //stimato sensore forza
-                  float ControlToActControl_T = 1.49e-02; //prova
+                  float ControlToActControl_T = 1.92e-02;// b = zeros(4,1); //stimato sensore forza
+//                  float ControlToActControl_T = 1.49e-02; //prova
                   float Mass_quadrotor = 2.4259; // no battery
 //                  float Mass_quadrotor = 3.2259; // con battery
 		  float gravity_compensation = -1.0f*9.81f*Mass_quadrotor*ControlToActControl_T;
@@ -1574,8 +1574,8 @@ MulticopterPositionControl::task_main()
 
 				//GM*	NB la z non è toccata
 				math::Vector<3> Kpv;
-				Kpv(0) = 1.5f;
-				Kpv(1) = 1.5f;
+				Kpv(0) = 1.4f; //1.5f; //migliore per ora
+				Kpv(1) = 1.4f; //1.5f;
 				Kpv(2) = 2.5f;//_params.vel_p(2);
 				math::Vector<3> Kiv;
 				Kiv(0) = 0.125f;
