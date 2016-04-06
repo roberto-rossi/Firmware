@@ -164,7 +164,7 @@ static void init_kalman(int w){
 	C_sonar.identity();C_sonar(1,1)=0.0f;
 	C_flow.identity();C_flow(0,0)=0.0f;
 		A_process.identity();A_process(0,1)=0.0f;//0.01;
-	R_vision=C_vision;R_vision(0,0)=0.0001f;R_vision(1,1)=0.2;
+	R_vision=C_vision;R_vision(0,0)=0.0001f;R_vision(1,1)=0.0001;
 	R_sonar=C_sonar;R_sonar(0,0)=1.0f;
 	R_flow=C_flow;R_flow(1,1)=0.2f;
 	Q_sistema.identity();Q_sistema(0,0)=0.025f;Q_sistema(1,1)=0.2f;
@@ -459,8 +459,8 @@ int position_estimator_inav_thread_main(int argc, char *argv[])
 	float last_vision_y = 0.0f;
 	float last_vision_z = 0.0f;
 	int spike_vision=0;
-	float max_vision_error=0.5; //metri di errore massimo
-	float flow_module_offset_z = 0.06f; //offset in z: 6cm in basso
+	float max_vision_error=0.2; //metri di errore massimo
+	float flow_module_offset_z = 0.03f; //offset in z: 6cm in basso
 	float offset_p4flow[] = { 0.0f, 0.0f, 0.0f };
 	float px4flow_om[] = { 0.0f, 0.0f, 0.0f };
 	float vel_comp[] = { 0.0f, 0.0f, 0.0f };
@@ -695,12 +695,12 @@ init_kalman(1);
 					sonar_time = t;
 
 					float sonar_pitch_correction = att.pitch;//eulerFromQuat(eigenqFromPx4q(_q));
-//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: att.pitch: %.4f",(double)att.pitch);				
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: att.pitch: %.4f",(double)att.pitch);
 //MODIFICA: nel pitch c'è da compensare il braccio -> +params.flow_module_offset_y*sin(angolo_pitch)
 
 					 //vertical distance
 					dist_ground = dist_con_offset * PX4_R(att.R, 2, 2)+params.flow_module_offset_y*sonar_pitch_correction;
-//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: dist corretta: %.4f",(double)dist_ground);				
+//mavlink_log_info(mavlink_fd, "[Giulio] SONAR: dist corretta: %.4f",(double)dist_ground);
 //printf("dist_ground: %-2.4g \n", (double)dist_ground);
 //printf("PX4_R22: %-2.4g \n", (double)PX4_R(att.R, 2, 2));
 //printf("sonar_pitch_correction: %-2.4g \n", (double)sonar_pitch_correction);
@@ -816,12 +816,12 @@ qualcosa tipo se il modulo di z > 10m lo assegnamo a sonar (può succedere solo 
 					px4flow_om[0] = flow_gyrospeed[0] - gyro_offset_filtered[0];
 					px4flow_om[1] = flow_gyrospeed[1] - gyro_offset_filtered[1];
 					px4flow_om[2] = flow_gyrospeed[2] - gyro_offset_filtered[2];
-					// performing the product om*(-r). Both in px4flow frame. 
-					// vel_comp is the velocity of the px4flow due to roll,pitch and yaw rates. 
+					// performing the product om*(-r). Both in px4flow frame.
+					// vel_comp is the velocity of the px4flow due to roll,pitch and yaw rates.
 					vel_comp[0]	=	-(px4flow_om[1]*offset_p4flow[2] - px4flow_om[2]*offset_p4flow[1]);
 					vel_comp[1]	=	-(px4flow_om[2]*offset_p4flow[0] - px4flow_om[0]*offset_p4flow[2]);
 					//vel_comp[2]	=	-(px4flow_om[0]*offset_p4flow[1] - px4flow_om[1]*offset_p4flow[0]); USELESS
-					
+
 					/* From p4flow ref to NED ref */
 					vel_comp_b[0] = vel_comp[1];
 					vel_comp_b[1] = -vel_comp[0];
@@ -959,7 +959,7 @@ in questo modo se e' uno spike al prossimo ciclo accetto il nuovo dato, se non l
 					if(spike_vision > 3 ){
 						last_vision_x = vision.x;
 						last_vision_y = vision.y;
-						last_vision_z = vision.z;						
+						last_vision_z = vision.z;
 					}
 					if(fabsf(last_vision_x - vision.x)>max_vision_error || fabsf(last_vision_y - vision.y)>max_vision_error ||
 						fabsf(last_vision_z - vision.z)>max_vision_error) {

@@ -90,7 +90,7 @@
 #include <controllib/block/BlockParam.hpp>
 //GM*
 #include <uORB/topics/csi.h>
-#include <uORB/topics/csi_dot.h>
+//#include <uORB/topics/csi_dot.h>
 
 #define TILT_COS_MAX	0.7f
 #define SIGMA			0.000001f
@@ -145,14 +145,14 @@ private:
 	int		_global_vel_sp_sub;		/**< offboard global velocity setpoint */
 
 	int		_csi_sub;			/**< csi */
-	int		_csi_dot_sub;			/**< csi_dot */
+//	int		_csi_dot_sub;			/**< csi_dot */
 
 	orb_advert_t	_att_sp_pub;			/**< attitude setpoint publication */
 	orb_advert_t	_local_pos_sp_pub;		/**< vehicle local position setpoint publication */
 	orb_advert_t	_global_vel_sp_pub;		/**< vehicle global velocity setpoint publication */
 
 	orb_advert_t	_csi_pub;			/**< csi pub */
-	orb_advert_t	_csi_dot_pub;			/**< csi pub */
+//	orb_advert_t	_csi_dot_pub;			/**< csi pub */
 
 	orb_id_t _attitude_setpoint_id;
 
@@ -168,7 +168,7 @@ private:
 	struct vehicle_global_velocity_setpoint_s	_global_vel_sp;		/**< vehicle global velocity setpoint */
 
 	struct csi_s					_csi;
-	struct csi_dot_s				_csi_dot;
+// struct csi_dot_s				_csi_dot;
 
 	control::BlockParamFloat _manual_thr_min;
 	control::BlockParamFloat _manual_thr_max;
@@ -258,6 +258,10 @@ private:
 	math::Vector<3> _vel_sp_prev;
 	math::Vector<3> _thrust_sp_prev;
 	math::Vector<3> _vel_err_d;		/**< derivative of current velocity */
+
+    math::Vector<3> pos_sp_prev; // RR*
+    math::Vector<3> AM_vel_prev; // RR*
+    math::Vector<3> _pos_prev;
 
 	math::Matrix<3, 3> _R;			/**< rotation matrix from attitude quaternions */
 	float _yaw;				/**< yaw angle (euler) */
@@ -375,14 +379,14 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_pos_sp_triplet_sub(-1),
 	_global_vel_sp_sub(-1),
 	_csi_sub(-1),
-	_csi_dot_sub(-1),
+//	_csi_dot_sub(-1),
 
 	/* publications */
 	_att_sp_pub(nullptr),
 	_local_pos_sp_pub(nullptr),
 	_global_vel_sp_pub(nullptr),
 	_csi_pub(nullptr),
-	_csi_dot_pub(nullptr),
+	//_csi_dot_pub(nullptr),
 	_attitude_setpoint_id(0),
 	_manual_thr_min(this, "MANTHR_MIN"),
 	_manual_thr_max(this, "MANTHR_MAX"),
@@ -421,7 +425,7 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	memset(&_ref_pos, 0, sizeof(_ref_pos));
 
 	memset(&_csi, 0, sizeof(_csi));
-	memset(&_csi_dot, 0, sizeof(_csi_dot));
+//	memset(&_csi_dot, 0, sizeof(_csi_dot));
 
 	_params.pos_p.zero();
 	_params.vel_p.zero();
@@ -629,9 +633,9 @@ MulticopterPositionControl::poll_subscriptions()
 		euler_angles = _R.to_euler();
 
 //GM*
-		_csi.csi[6]=euler_angles(0);
-		_csi.csi[7]=euler_angles(1);
-		_csi.csi[8]=euler_angles(2);
+		//_csi.csi[6]=euler_angles(0);
+		//_csi.csi[7]=euler_angles(1);
+		//_csi.csi[8]=euler_angles(2);
 		_yaw = euler_angles(2);
 	}
 
@@ -1154,7 +1158,7 @@ MulticopterPositionControl::task_main()
 	_global_vel_sp_sub = orb_subscribe(ORB_ID(vehicle_global_velocity_setpoint));
 
 	_csi_sub = orb_subscribe(ORB_ID(csi));
-	_csi_dot_sub = orb_subscribe(ORB_ID(csi_dot));
+//	_csi_dot_sub = orb_subscribe(ORB_ID(csi_dot));
 
 	parameters_update(true);
 
@@ -1186,6 +1190,10 @@ MulticopterPositionControl::task_main()
 
 	fds[0].fd = _local_pos_sub;
 	fds[0].events = POLLIN;
+
+    _pos_prev.zero();
+    pos_sp_prev.zero();
+    AM_vel_prev.zero();
 
 	while (!_task_should_exit) {
 		/* wait for up to 500ms for data */
@@ -1358,29 +1366,42 @@ MulticopterPositionControl::task_main()
 			} else {
 				/* run position & altitude controllers, if enabled (otherwise use already computed velocity setpoints) */
 
-				//GM*	NB la z non è toccata
+				//GM*
 				math::Vector<3> Kpp;
 				Kpp(0) = 0.2f;//0.3
 				Kpp(1) = 0.2f;
-				Kpp(2) = 0.5f;// _params.pos_p(2);
+				Kpp(2) = 0.2f;// _params.pos_p(2);
+
+                math::Vector<3> Kff_p;
+                Kff_p(0) = 0.5f;
+                Kff_p(1) = 0.5f;
+                Kff_p(2) = 0.5f;
+
+                math::Vector<3> vel_sp_ff = Kff_p.emult(_pos_sp - pos_sp_prev)/dt;
+                pos_sp_prev = _pos_sp;
+
+
 				if (_run_pos_control) {
 					//_vel_sp(0) = (_pos_sp(0) - _pos(0)) * _params.pos_p(0);
 					//_vel_sp(1) = (_pos_sp(1) - _pos(1)) * _params.pos_p(1);
-					_vel_sp(0) = (_pos_sp(0) - _pos(0)) * Kpp(0);
-					_vel_sp(1) = (_pos_sp(1) - _pos(1)) * Kpp(1);
+					_vel_sp(0) = (_pos_sp(0) - _pos(0)) * Kpp(0) + vel_sp_ff(0);
+					_vel_sp(1) = (_pos_sp(1) - _pos(1)) * Kpp(1) + vel_sp_ff(1);
 				}
 
 				if (_run_alt_control) {
-					_vel_sp(2) = (_pos_sp(2) - _pos(2)) * Kpp(2);
+					_vel_sp(2) = (_pos_sp(2) - _pos(2)) * Kpp(2) + vel_sp_ff(2);
 				}
 
 //GM*
 			_csi.csi[0]=_pos(0);
 			_csi.csi[1]=_pos(1);
 			_csi.csi[2]=_pos(2);
-			_csi_dot.csi_dot[0]=_pos_sp(0);
-			_csi_dot.csi_dot[1]=_pos_sp(1);
-			_csi_dot.csi_dot[3]=_pos_sp(2);
+            _csi.csi[3]=_pos_sp(0);
+			_csi.csi[4]=_pos_sp(1);
+			_csi.csi[5]=_pos_sp(2);
+			//_csi_dot.csi_dot[0]=_pos_sp(0);
+			//_csi_dot.csi_dot[1]=_pos_sp(1);
+			//_csi_dot.csi_dot[2]=_pos_sp(2);
 
 				/* make sure velocity setpoint is saturated in xy*/
 				float vel_norm_xy = sqrtf(_vel_sp(0) * _vel_sp(0) +
@@ -1515,6 +1536,8 @@ MulticopterPositionControl::task_main()
 							}
 
 							thrust_int(2) = -i;
+
+							_pos_prev(2) = _pos(2);//RR*
 						}
 
 					} else {
@@ -1523,9 +1546,11 @@ MulticopterPositionControl::task_main()
 
 					if (_control_mode.flag_control_velocity_enabled) {
 						if (reset_int_xy) {
-							reset_int_xy = false;
-							thrust_int(0) = 0.0f;
-							thrust_int(1) = 0.0f;
+							reset_int_xy    = false;
+							thrust_int(0)   = 0.0f;
+							thrust_int(1)   = 0.0f;
+							_pos_prev(0)    = _pos(0);
+							_pos_prev(1)    = _pos(1);//RR*
 						}
 
 					} else {
@@ -1533,7 +1558,13 @@ MulticopterPositionControl::task_main()
 					}
 
 					/* velocity error */
-					math::Vector<3> vel_err = _vel_sp - _vel;
+					float tau_der = 0.15;
+					math::Vector<3> AM_vel = (AM_vel_prev*tau_der + _pos - _pos_prev)/(tau_der+dt);//RR*
+                    AM_vel_prev  = AM_vel;
+                    _pos_prev = _pos;
+					//math::Vector<3> vel_err = _vel_sp - _vel; //RR*
+					math::Vector<3> vel_err = _vel_sp - AM_vel; //RR*
+
 //GM* Filtro passabasso
 //					float tau_filtro = 5;
 //					float tau_t = tau_filtro * dt;
@@ -1541,12 +1572,24 @@ MulticopterPositionControl::task_main()
 //vel_err=vel_err_u* tau_t/(1+tau_t) + vel_err_old * 1/(1+tau_t);
 //vel_err_old=vel_err;
 //GM*
-			_csi.csi[3]=_vel(0);
-			_csi.csi[4]=_vel(1);
-			_csi.csi[5]=_vel(2);
-			_csi_dot.csi_dot[3]=_vel_sp(0);
-			_csi_dot.csi_dot[4]=_vel_sp(1);
-			_csi_dot.csi_dot[5]=_vel_sp(2);
+			//_csi.csi[3]=_vel(0);
+			//_csi.csi[4]=_vel(1);
+			//_csi.csi[5]=_vel(2);
+
+			//_csi.csi[6]=    _vel(0);
+			//_csi.csi[7]=    _vel(1);
+			//_csi.csi[8]=    _vel(2);
+			_csi.csi[6]=    AM_vel(0);
+			_csi.csi[7]=    AM_vel(1);
+			_csi.csi[8]=    AM_vel(2);
+
+			_csi.csi[9]=    _vel_sp(0);
+			_csi.csi[10]=   _vel_sp(1);
+			//_csi.csi[11]=_vel_sp(2);
+
+			//_csi_dot.csi_dot[3]=_vel_sp(0);
+			//_csi_dot.csi_dot[4]=_vel_sp(1);
+			//_csi_dot.csi_dot[5]=_vel_sp(2);
 
 					/* thrust vector in NED frame */
 					// TODO?: + _vel_sp.emult(_params.vel_ff)
@@ -1574,12 +1617,12 @@ MulticopterPositionControl::task_main()
 
 				//GM*	NB la z non è toccata
 				math::Vector<3> Kpv;
-				Kpv(0) = 1.4f; //1.5f; //migliore per ora
-				Kpv(1) = 1.4f; //1.5f;
+				Kpv(0) = 2.3f; //1.5f; //migliore per ora
+				Kpv(1) = 2.3f; //1.5f;
 				Kpv(2) = 2.5f;//_params.vel_p(2);
 				math::Vector<3> Kiv;
-				Kiv(0) = 0.125f;
-				Kiv(1) = 0.125f;
+				Kiv(0) = 0.8f;
+				Kiv(1) = 0.8f;
 				Kiv(2) = 0.625f;//_params.vel_i(2);
 				math::Vector<3> Kdv;
 				Kdv(0) = 0.0f;
@@ -1591,7 +1634,7 @@ MulticopterPositionControl::task_main()
 				Kffv(2) = 0.0f;
 
 					//math::Vector<3> thrust_sp = ( vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) )*Mass_quadrotor*ControlToActControl_T + thrust_int; // DA PENSARE SE AGGIUNGERE GRAVITA'!!!
-math::Vector<3> thrust_sp = ( vel_err.emult(Kpv) + _vel_err_d.emult(Kdv) )*Mass_quadrotor*ControlToActControl_T + thrust_int;
+            math::Vector<3> thrust_sp = ( vel_err.emult(Kpv) + _vel_err_d.emult(Kdv) )*Mass_quadrotor*ControlToActControl_T + thrust_int;
 
 					//math::Vector<3> Aprintf("thrust_int e thrust_sp: %-2.4g ****  %-2.4g \n", (double)thrust_int(2), (double)thrust_sp(2));M_Thrust = vel_err.emult(_params.vel_p) + _vel_err_d.emult(_params.vel_d) + thrust_int;
 //GM*
@@ -1617,10 +1660,11 @@ math::Vector<3> thrust_sp = ( vel_err.emult(Kpv) + _vel_err_d.emult(Kdv) )*Mass_
 					}
 
 
-//GM*
-			_csi.csi[9]=thrust_sp(0);
-			_csi.csi[10]=thrust_sp(1);
-			_csi_dot.csi_dot[9]=thrust_sp(2);
+//GM* //RR*
+			//_csi.csi[9]=thrust_sp(0);
+			//_csi.csi[10]=thrust_sp(1);
+
+			//_csi_dot.csi_dot[9]=thrust_sp(2);
 
 					/* limit thrust vector and check for saturation */
 					bool saturation_xy = false;
@@ -1994,9 +2038,9 @@ math::Vector<3> thrust_sp = ( vel_err.emult(Kpv) + _vel_err_d.emult(Kdv) )*Mass_
 		      !(_control_mode.flag_control_position_enabled ||
 			_control_mode.flag_control_velocity_enabled))) {
 
-			_csi_dot.csi_dot[6]=_att_sp.roll_body;
-			_csi_dot.csi_dot[7]=_att_sp.pitch_body;
-			_csi_dot.csi_dot[8]=_att_sp.yaw_body;
+			//_csi_dot.csi_dot[6]=_att_sp.roll_body;
+			//_csi_dot.csi_dot[7]=_att_sp.pitch_body;
+			//_csi_dot.csi_dot[8]=_att_sp.yaw_body;
 
 			//GM* csi pub
 			if (_csi_pub != nullptr) {
@@ -2005,12 +2049,12 @@ math::Vector<3> thrust_sp = ( vel_err.emult(Kpv) + _vel_err_d.emult(Kdv) )*Mass_
 			} else{
 				_csi_pub = orb_advertise(ORB_ID(csi), &_csi);
 			}
-			if (_csi_dot_pub != nullptr) {
-				orb_publish(ORB_ID(csi_dot), _csi_dot_pub, &_csi_dot);
+//			if (_csi_dot_pub != nullptr) {
+//				orb_publish(ORB_ID(csi_dot), _csi_dot_pub, &_csi_dot);
 
-			} else{
-				_csi_dot_pub = orb_advertise(ORB_ID(csi_dot), &_csi_dot);
-			}
+//			} else{
+//				_csi_dot_pub = orb_advertise(ORB_ID(csi_dot), &_csi_dot);
+//			}
 
 
 

@@ -614,14 +614,14 @@ void AttitudeEstimatorQ::task_main()
 		orb_publish_auto(ORB_ID(vehicle_attitude), &_att_pub, &att, &att_inst, ORB_PRIO_HIGH);
 
 //MODIFICA: pubblico la q_att su polimi_attitude_ned
-		struct polimi_attitude_ned_s polimi_ned = {};
-		polimi_ned.w=_q.data[0];
-		polimi_ned.x=_q.data[1];
-		polimi_ned.y=_q.data[2];
-		polimi_ned.z=_q.data[3];
+		//struct polimi_attitude_ned_s polimi_ned = {};
+		//polimi_ned.w=_q.data[0];
+		//polimi_ned.x=_q.data[1];
+		//polimi_ned.y=_q.data[2];
+		//polimi_ned.z=_q.data[3];
 
-		int polimi_ned_inst;
-		orb_publish_auto(ORB_ID(polimi_attitude_ned), &_polimi_attitude_ned_pub, &polimi_ned, &polimi_ned_inst, ORB_PRIO_HIGH);
+		//int polimi_ned_inst;
+		//orb_publish_auto(ORB_ID(polimi_attitude_ned), &_polimi_attitude_ned_pub, &polimi_ned, &polimi_ned_inst, ORB_PRIO_HIGH);
 
 //mavlink_log_info(_mavlink_fd, "[Giulio] q polimi_ned: %.3f %.3f %.3f %.3f",(double)polimi_ned.w,(double)polimi_ned.x,(double)_q.data[2],(double)_q.data[3]);
 

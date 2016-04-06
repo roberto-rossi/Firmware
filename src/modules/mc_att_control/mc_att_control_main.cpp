@@ -90,6 +90,9 @@
 #include <lib/geo/geo.h>
 #include <lib/tailsitter_recovery/tailsitter_recovery.h>
 
+#include <uORB/topics/polimi_attitude_ned.h>
+#include <uORB/topics/csi_dot.h>
+
 #include "matrix/Matrix.hpp"
 
 /**
@@ -139,6 +142,7 @@ private:
 	int		_armed_sub;				/**< arming status subscription */
 	int		_vehicle_status_sub;	/**< vehicle status subscription */
 	int 	_motor_limits_sub;		/**< motor limits subscription */
+    int		_csi_dot_sub;			/**< csi_dot */ //RR*
 
 	orb_advert_t	_v_rates_sp_pub;		/**< rate setpoint publication */
 	orb_advert_t	_actuators_0_pub;		/**< attitude actuator controls publication */
@@ -146,6 +150,9 @@ private:
 
 	orb_id_t _rates_sp_id;	/**< pointer to correct rates setpoint uORB metadata structure */
 	orb_id_t _actuators_id;	/**< pointer to correct actuator controls0 uORB metadata structure */
+
+	orb_advert_t	_polimi_attitude_ned_pub; //RR*
+	orb_advert_t	_csi_dot_pub;			/**< csi pub */ //RR*
 
 	bool		_actuators_0_circuit_breaker_enabled;	/**< circuit breaker to suppress output */
 
@@ -160,6 +167,10 @@ private:
 	struct multirotor_motor_limits_s	_motor_limits;		/**< motor limits */
 	struct mc_att_ctrl_status_s 		_controller_status; /**< controller status */
 
+	struct polimi_attitude_ned_s		_polimi_attitude_ned;
+	struct csi_dot_s				    _csi_dot;   //RR*
+
+
 	perf_counter_t	_loop_perf;			/**< loop performance counter */
 	perf_counter_t	_controller_latency_perf;
 
@@ -171,6 +182,8 @@ private:
 	math::Vector<3>		_att_control;	/**< attitude control vector */
 
 	math::Matrix<3, 3>  _I;				/**< identity matrix */
+
+    math::Vector<3>	    euler_angles_sp_prev;
 
 	struct {
 		param_t roll_p;
@@ -314,6 +327,7 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_manual_control_sp_sub(-1),
 	_armed_sub(-1),
 	_vehicle_status_sub(-1),
+	_csi_dot_sub(-1), //RR*
 
 	/* publications */
 	_v_rates_sp_pub(nullptr),
@@ -321,6 +335,9 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	_controller_status_pub(nullptr),
 	_rates_sp_id(0),
 	_actuators_id(0),
+
+    _polimi_attitude_ned_pub(nullptr), //RR*
+    _csi_dot_pub(nullptr),//RR*
 
 	_actuators_0_circuit_breaker_enabled(false),
 
@@ -340,6 +357,10 @@ MulticopterAttitudeControl::MulticopterAttitudeControl() :
 	memset(&_vehicle_status, 0, sizeof(_vehicle_status));
 	memset(&_motor_limits, 0, sizeof(_motor_limits));
 	memset(&_controller_status, 0, sizeof(_controller_status));
+
+	memset(&_polimi_attitude_ned, 0, sizeof(_polimi_attitude_ned)); // RR*
+	memset(&_csi_dot, 0, sizeof(_csi_dot)); // RR*
+
 	_vehicle_status.is_rotary_wing = true;
 
 	_params.att_p.zero();
@@ -715,13 +736,40 @@ MulticopterAttitudeControl::control_attitude(float dt)
 		e_R = e_R * (1.0f - direct_w) + e_R_d * direct_w;
 	}
 
+
+
+        //math::Quaternion q_att(_ctrl_state.q[0], _ctrl_state.q[1], _ctrl_state.q[2], _ctrl_state.q[3]);
+        //_R = q_att.to_dcm();
+        math::Vector<3> euler_angles;
+    euler_angles = R.to_euler();
+
+    _csi_dot.csi_dot[3]=euler_angles(0);
+    _csi_dot.csi_dot[4]=euler_angles(1);
+    _csi_dot.csi_dot[5]=euler_angles(2);
+
+    _csi_dot.csi_dot[6]=_v_att_sp.roll_body;
+    _csi_dot.csi_dot[7]=_v_att_sp.pitch_body;
+    _csi_dot.csi_dot[8]=_v_att_sp.yaw_body;
+    //_csi_dot.csi_dot[9]=thrust_sp(2);
+    _csi_dot.csi_dot[9]=_thrust_sp;
+
+
 	/* calculate angular rates setpoint */
-//GM*	
+
+//GM*
 	math::Vector<3> Kpp;
-	Kpp(0) = 7.0f;
-	Kpp(1) = 7.0f;
-	Kpp(2) = 5.0f;
-	_rates_sp = Kpp.emult(e_R);
+	Kpp(0) = 6.0f;
+	Kpp(1) = 6.0f;
+	Kpp(2) = 2.0f;
+	math::Vector<3> Kff_pv;
+	Kff_pv(0) = 0.5f;
+	Kff_pv(1) = 0.5f;
+	Kff_pv(2) = 0.5f;
+
+	math::Vector<3> _euler_angles_sp_ff = Kff_pv.emult(euler_angles + e_R - euler_angles_sp_prev)/dt;
+    euler_angles_sp_prev = euler_angles + e_R;
+	_rates_sp = Kpp.emult(e_R) + _euler_angles_sp_ff;
+
 	//_rates_sp = _params.att_p.emult(e_R);
 
 	/* limit rates */
@@ -759,18 +807,28 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	/* angular rates error */
 	math::Vector<3> rates_err = _rates_sp - rates;
 
+    _polimi_attitude_ned.w=rates(0); // RR*
+    _polimi_attitude_ned.x=rates(1); // RR*
+    _polimi_attitude_ned.y=_rates_sp(0); // RR*
+    _polimi_attitude_ned.z=_rates_sp(1); // RR*
+
+    if (_polimi_attitude_ned_pub != nullptr) {  // RR*
+        orb_publish(ORB_ID(polimi_attitude_ned), _polimi_attitude_ned_pub, &_polimi_attitude_ned); // RR*
+    } else{ // RR*
+        _polimi_attitude_ned_pub = orb_advertise(ORB_ID(polimi_attitude_ned), &_polimi_attitude_ned); // RR*
+    }
 
 	// RR* ....................
 
 	math::Vector<3> ControlToActControl_tau(6.53e-02,1.624e-01,5.376e-01);
 	math::Vector<3> Kpv;
-	Kpv(0) = 30.0f;
-	Kpv(1) = 30.0f;
-	Kpv(2) = 25.0f;
+	Kpv(0) = 20.0f;
+	Kpv(1) = 25.0f;
+	Kpv(2) = 20.0f;
 	math::Vector<3> Kiv;
 	Kiv(0) = 40.0f; // 46.87f;//62.5f;
-	Kiv(1) = 40.0f; // 46.87f;//62.5f;
-	Kiv(2) = 62.5f;
+	Kiv(1) = 70.0f; // 46.87f;//62.5f;
+	Kiv(2) = 30.0f;
 	math::Vector<3> Kdv;
 	Kdv(0) = 0.0f;//02f;
 	Kdv(1) = 0.0f;//02f;
@@ -783,8 +841,7 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	// MASS!
 	//math::Vector<3> _att_control_acc_pd = _params.rate_p.emult(rates_err) +  _params.rate_d.emult(_rates_prev - rates) / dt + _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
 
-math::Vector<3> _att_control_acc_pd = Kpv.emult(rates_err) + Kdv.emult(_rates_prev - rates)/dt + Kffv.emult(_rates_sp - _rates_sp_prev) / dt;
-
+    math::Vector<3> _att_control_acc_pd = Kpv.emult(rates_err) + Kdv.emult(_rates_prev - rates)/dt + Kffv.emult(_rates_sp - _rates_sp_prev) / dt;
 
     // PER IL CONTROLLO CON BRACCIO, QUi SOMMARE TUTTE LE COPPIE POSSIBILI =)
 
@@ -799,6 +856,18 @@ math::Vector<3> _att_control_acc_pd = Kpv.emult(rates_err) + Kdv.emult(_rates_pr
 
 	_rates_sp_prev = _rates_sp;
 	_rates_prev = rates;
+
+    _csi_dot.csi_dot[0]=_att_control(0);
+    _csi_dot.csi_dot[1]=_att_control(1);
+    _csi_dot.csi_dot[2]=_att_control(2);
+
+    if (_csi_dot_pub != nullptr) {
+        orb_publish(ORB_ID(csi_dot), _csi_dot_pub, &_csi_dot);
+
+    } else{
+        _csi_dot_pub = orb_advertise(ORB_ID(csi_dot), &_csi_dot);
+    }
+
 
 	/* update integral only if not saturated on low limit and if motor commands are not saturated */
 	if (_thrust_sp > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
@@ -952,6 +1021,8 @@ MulticopterAttitudeControl::task_main()
 
 	fds[0].fd = _ctrl_state_sub;
 	fds[0].events = POLLIN;
+
+    euler_angles_sp_prev.zero(); // RR*
 
 	while (!_task_should_exit) {
 
