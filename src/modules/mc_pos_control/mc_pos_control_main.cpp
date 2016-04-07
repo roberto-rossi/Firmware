@@ -260,6 +260,7 @@ private:
 	math::Vector<3> _vel_err_d;		/**< derivative of current velocity */
 
     math::Vector<3> pos_sp_prev; // RR*
+    math::Vector<3> pos_sp_dot_prev; // RR*
     math::Vector<3> AM_vel_prev; // RR*
     math::Vector<3> _pos_prev;
 
@@ -1194,6 +1195,7 @@ MulticopterPositionControl::task_main()
     _pos_prev.zero();
     pos_sp_prev.zero();
     AM_vel_prev.zero();
+    pos_sp_dot_prev.zero();
 
 	while (!_task_should_exit) {
 		/* wait for up to 500ms for data */
@@ -1370,15 +1372,20 @@ MulticopterPositionControl::task_main()
 				math::Vector<3> Kpp;
 				Kpp(0) = 0.2f;//0.3
 				Kpp(1) = 0.2f;
-				Kpp(2) = 0.2f;// _params.pos_p(2);
+				Kpp(2) = 0.15f; // 0.2f;// _params.pos_p(2);
 
                 math::Vector<3> Kff_p;
                 Kff_p(0) = 0.5f;
                 Kff_p(1) = 0.5f;
                 Kff_p(2) = 0.5f;
 
-                math::Vector<3> vel_sp_ff = Kff_p.emult(_pos_sp - pos_sp_prev)/dt;
+                float tau_der_p = 0.15;
+                math::Vector<3> pos_sp_dot = (pos_sp_dot_prev*tau_der_p + _pos_sp - pos_sp_prev)/(tau_der_p+dt);//RR*
                 pos_sp_prev = _pos_sp;
+                pos_sp_dot_prev = pos_sp_dot;
+
+                math::Vector<3> vel_sp_ff = Kff_p.emult(pos_sp_dot);
+
 
 
 				if (_run_pos_control) {
@@ -1558,8 +1565,8 @@ MulticopterPositionControl::task_main()
 					}
 
 					/* velocity error */
-					float tau_der = 0.15;
-					math::Vector<3> AM_vel = (AM_vel_prev*tau_der + _pos - _pos_prev)/(tau_der+dt);//RR*
+					float tau_der_v = 0.15;
+					math::Vector<3> AM_vel = (AM_vel_prev*tau_der_v + _pos - _pos_prev)/(tau_der_v+dt);//RR*
                     AM_vel_prev  = AM_vel;
                     _pos_prev = _pos;
 					//math::Vector<3> vel_err = _vel_sp - _vel; //RR*
@@ -1619,11 +1626,11 @@ MulticopterPositionControl::task_main()
 				math::Vector<3> Kpv;
 				Kpv(0) = 2.3f; //1.5f; //migliore per ora
 				Kpv(1) = 2.3f; //1.5f;
-				Kpv(2) = 2.5f;//_params.vel_p(2);
+				Kpv(2) = 2.0f; // 2.5f;//_params.vel_p(2);
 				math::Vector<3> Kiv;
-				Kiv(0) = 0.8f;
-				Kiv(1) = 0.8f;
-				Kiv(2) = 0.625f;//_params.vel_i(2);
+				Kiv(0) = 0.65f; //0.8f
+				Kiv(1) = 0.65f; //0.8f
+				Kiv(2) = 0.46f;//0.625f _params.vel_i(2);
 				math::Vector<3> Kdv;
 				Kdv(0) = 0.0f;
 				Kdv(1) = 0.0f;
