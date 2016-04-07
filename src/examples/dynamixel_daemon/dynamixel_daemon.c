@@ -42,6 +42,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <drivers/drv_hrt.h>
 
 #include <px4_config.h>
 #include <px4_tasks.h>
@@ -193,13 +194,13 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     double err_v[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
     double err_pos[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
     double err_v_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-    float q_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-    float q_dot_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
-    double Ts = 0.02;
-    const float  c_dev = 60.0f; //60;
-    const double Kpp =  1;   //3.0000    0.4048    0.6326S
-    const double Kpv =  0.29;
-    const double Kiv =  0.46;//1.2;
+    int q_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+//    float q_dot_old[5] = {0.0, 0.0, 0.0, 0.0, 0.0};
+    hrt_abstime Ts_prev = 0;
+//    const float  c_dev = 60.0f; //60;
+    double Kpp[5] = {2.0, 2.0, 2.0, 2.0, 2.0}; //1;   //2.0000    0.3965    0.0701
+    double Kpv[5] = {0.3965, 3.5055, 0.3965, 0.3965, 0.39}; //0.29;
+    double Kiv[5] = {0.0701, 0.6199, 0.6139, 0.6193, 0.6199}; //0.46;//1.2;
     int bit_torque[5];
     int reset_flag = 1;
 
@@ -208,7 +209,7 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     printf("Initialization result: %d \n",res);
 
     //SyncWrite Initialization
-    int NUM_ACTUATOR = 4;
+    int NUM_ACTUATOR = 5;
     int i;
     int id[5];
     for( i=0; i<NUM_ACTUATOR; i++ )
@@ -230,13 +231,26 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     //Inizializzazione tv_old
     struct timeval tv;
     gettimeofday (&tv, NULL);
-    long tv_old = tv.tv_usec;
+
+    hrt_abstime t = hrt_absolute_time();
+    float Ts = Ts_prev != 0 ? (t - Ts_prev) * 0.000001f : 0.02f;
 
 //    struct timeval Tstart;
 //    gettimeofday (&Tstart, NULL);
 
     //Main Loop
 	while (!thread_should_exit) {
+        //Calculate Ts
+//        gettimeofday (&tv, NULL);
+//        Ts = (tv.tv_usec-tv_old)/1000000.0;
+//        if(Ts < 0.01)
+//            Ts = 0.02;
+//        tv_old = tv.tv_usec;
+//      printf("Ts: %-2.4g  \n",Ts);
+        hrt_abstime t = hrt_absolute_time();
+        Ts = Ts_prev != 0 ? (t - Ts_prev) * 0.000001f : 0.02f;
+        Ts_prev = t;
+
 	    //Read position and speed from uOrb
         orb_copy(ORB_ID(am_tau), am_tau_sub, &am_tau);
         orb_copy(ORB_ID(vehicle_control_mode), control_mode_sub, &control_mode);
@@ -249,20 +263,19 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
                 usleep(1000);
                 res = dxl_initialize(1,9);
             } else {
-                dynamixel_state.q[k-1]=((float)state[0]-512)/195.5696f;
-                dynamixel_state.q_dot[k-1]=(q_dot_old[k-1]+c_dev*(dynamixel_state.q[k-1]-q_old[k-1]))/((float)Ts*c_dev+1); //NON ESEGUITA!
-                dynamixel_state.q_dot[k-1] = (dynamixel_state.q[k-1] - q_old[k-1])/(float)Ts;
-                q_old[k-1] = dynamixel_state.q[k-1];
-                q_dot_old[k-1] = dynamixel_state.q_dot[k-1];
+                dynamixel_state.q[k-1]=(float)(state[0]-512)*0.005113281f; //195.5696f;
+                dynamixel_state.q_dot[k-1] = (float)(state[0] - q_old[k-1])*0.005113281f/((float)Ts*2);
+                q_old[k-1] = state[0];
+                if (k==5) {
+                    dynamixel_state.q[1]=(float)(state[0]-512)*0.005113281f; //195.5696f;
+                    dynamixel_state.q_dot[1] = (float)(state[0] - q_old[k-1])*0.005113281f/((float)Ts*2);
+                }
+//                dynamixel_state.q_dot[k-1]=(q_dot_old[k-1]+c_dev*(dynamixel_state.q[k-1]-q_old[k-1]))/((float)Ts*c_dev+1); //NON ESEGUITA!
+//                dynamixel_state.q_dot[k-1] = (dynamixel_state.q[k-1] - q_old[k-1])/(float)Ts/2;
+//                q_old[k-1] = dynamixel_state.q[k-1];
+//                q_dot_old[k-1] = dynamixel_state.q_dot[k-1];
             }
         }
-        //Calculate Ts
-        gettimeofday (&tv, NULL);
-        Ts = (tv.tv_usec-tv_old)/1000000.0;
-        if(Ts < 0.01)
-            Ts = 0.02;
-        tv_old = tv.tv_usec;
-//      printf("Ts: %-2.4g  \n",Ts);
 
         if (!control_mode.flag_control_offboard_enabled){
             if (reset_flag==1) {
@@ -277,12 +290,17 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
                 //Calcolo errore di posizione
                 err_pos[i]=(double)(csi_r.csi_r[i+6] - dynamixel_state.q[i]);
                 //Calcolo errore velocità + FeedForward
-                err_v[i] = err_pos[i]*Kpp + (double)csi_r_dot.csi_r_dot[i+6] - (double)dynamixel_state.q_dot[i];
+                err_v[i] = err_pos[i]*Kpp[i] + (double)csi_r_dot.csi_r_dot[i+6] - (double)dynamixel_state.q_dot[i];
                 //Controllore PI discretizzato con EI
-                torque[i] = torque_old[i] + (err_v[i]-err_v_old[i])*Kpv + err_v[i]*Ts*Kiv;
+                torque[i] = torque_old[i] + (err_v[i]-err_v_old[i])*Kpv[i] + err_v[i]*(double)Ts*Kiv[i];
+                if (i == 1)
+                    torque[i] = 0;
                 if (i == 3)
-                    torque[i] = torque_old[i] + (err_v[i]-err_v_old[i])*Kpv*0.5 + err_v[i]*Ts*Kiv;
-                //torque[i] = (double)csi_r_dot.csi_r_dot[i+6];
+                    torque[i] = torque_old[i] + (err_v[i]-err_v_old[i])*Kpv[i]*0.5 + err_v[i]*(double)Ts*Kiv[i];
+                if (i == 5)
+                    torque[5] = torque_old[1] + (err_v[1]-err_v_old[1])*Kpv[1] + err_v[1]*(double)Ts*Kiv[1];
+//                if (i == 0)
+//                    torque[i] = (double)csi_r_dot.csi_r_dot[i+6];
                 //Limit torque 1.5 Nm
                 if (torque[i] > 1.4)
                     torque[i] = 1.4;
@@ -292,7 +310,7 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
                 torque_old[i]=torque[i];
                 err_v_old[i]=err_v[i];
                 //Conversione in bit
-                bit_torque[i] = (int)(torque[i] / 1.5 * 1000); //*1000
+                bit_torque[i] = (int)(torque[i] / 1.5f * 1000.0f); //*1000
                 if (bit_torque[i]< 0)
                     bit_torque[i] = - bit_torque[i] + 1024;
             }
@@ -303,6 +321,10 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
             for (int i = 0; i < 4; ++i) {
                 //Conversione in bit
                 bit_torque[i] = (int)(am_tau.tau_robot[i] / 1.5f * 1000.0f);
+                if (i == 1)
+                    bit_torque[1] = 0;
+                if (i == 4)
+                    bit_torque[4] = (int)(am_tau.tau_robot[1] / 1.5f * 1000.0f);
                 //Limit torque
                 if (bit_torque[i] > 1000)
                     bit_torque[i] = 1000;
