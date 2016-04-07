@@ -310,7 +310,7 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
                 torque_old[i]=torque[i];
                 err_v_old[i]=err_v[i];
                 //Conversione in bit
-                bit_torque[i] = (int)(torque[i] / 1.5f * 1000.0f); //*1000
+                bit_torque[i] = (int)(torque[i] / 1.5 * 1000.0); //*1000
                 if (bit_torque[i]< 0)
                     bit_torque[i] = - bit_torque[i] + 1024;
             }
