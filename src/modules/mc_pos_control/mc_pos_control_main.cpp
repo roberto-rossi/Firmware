@@ -247,7 +247,7 @@ private:
 	bool _run_pos_control;
 	bool _run_alt_control;
 //GM*
-	bool reset_int_flag;
+	bool reset_int_flag = true;
 
 	math::Vector<3> _pos;
 	math::Vector<3> _pos_sp;
@@ -1274,9 +1274,14 @@ MulticopterPositionControl::task_main()
 			_vel_err_d(2) = _vel_z_deriv.update(-_vel(2));
 		}
 
-		if (_control_mode.flag_control_manual_enabled && !reset_int_flag){
-			reset_int_flag=true;
-		}
+		//if (_control_mode.flag_control_manual_enabled && !reset_int_flag){
+		//	reset_int_flag=true;
+		//}
+
+        if (!reset_int_flag && !_control_mode.flag_control_offboard_enabled) {
+            printf("set flag position \n");
+            reset_int_flag = true;
+        } //RR*
 
 		if (_control_mode.flag_control_altitude_enabled ||
 		    _control_mode.flag_control_position_enabled ||
@@ -1368,18 +1373,44 @@ MulticopterPositionControl::task_main()
 			} else {
 				/* run position & altitude controllers, if enabled (otherwise use already computed velocity setpoints) */
 
+                float ControlToActControl_T = 1.92e-02;// b = zeros(4,1); //stimato sensore forza
+//                  float ControlToActControl_T = 1.49e-02; //prova
+                float Mass_quadrotor = 2.4259; // no battery
+//                  float Mass_quadrotor = 3.2259; // con battery
+                float gravity_compensation = -1.0f*9.81f*Mass_quadrotor*ControlToActControl_T;
+
+            if (_control_mode.flag_control_offboard_enabled){
+                if (reset_int_flag) {
+                    printf("Reset pos_sp state! \n");
+                    pos_sp_dot_prev.zero();
+                    pos_sp_prev     = _pos_sp;
+                    _pos_prev(0)    = _pos(0);//RR*
+                    _pos_prev(1)    = _pos(1);//RR*
+                    _pos_prev(2)    = _pos(2);//RR*
+
+                    AM_vel_prev.zero();
+
+                    printf("reset integrale\n");
+                    thrust_int(0) = 0.0f;
+                    thrust_int(1) = 0.0f;
+                    thrust_int(2) = _thrust_sp_prev(2)-gravity_compensation;//0.0f;//_thrust_sp_prev(2)-gravity_compensation;
+                    }
+                    reset_int_flag = false;
+                    reset_int_z = false;
+            }
+
 				//GM*
 				math::Vector<3> Kpp;
-				Kpp(0) = 0.2f;//0.3
-				Kpp(1) = 0.2f;
-				Kpp(2) = 0.15f; // 0.2f;// _params.pos_p(2);
+				Kpp(0) = 0.3f;//0.3
+				Kpp(1) = 0.3f;
+				Kpp(2) = 0.3f; // 0.2f;// _params.pos_p(2);
 
                 math::Vector<3> Kff_p;
-                Kff_p(0) = 0.5f;
-                Kff_p(1) = 0.5f;
-                Kff_p(2) = 0.5f;
+                Kff_p(0) = 0.0f;
+                Kff_p(1) = 0.0f;
+                Kff_p(2) = 0.0f;
 
-                float tau_der_p = 0.15;
+                float tau_der_p = 0.2;
                 math::Vector<3> pos_sp_dot = (pos_sp_dot_prev*tau_der_p + _pos_sp - pos_sp_prev)/(tau_der_p+dt);//RR*
                 pos_sp_prev = _pos_sp;
                 pos_sp_dot_prev = pos_sp_dot;
@@ -1544,7 +1575,7 @@ MulticopterPositionControl::task_main()
 
 							thrust_int(2) = -i;
 
-							_pos_prev(2) = _pos(2);//RR*
+							//_pos_prev(2) = _pos(2);//RR*
 						}
 
 					} else {
@@ -1603,19 +1634,20 @@ MulticopterPositionControl::task_main()
 
 
 					// RR* .............
-                  float ControlToActControl_T = 1.92e-02;// b = zeros(4,1); //stimato sensore forza
+//                  float ControlToActControl_T = 1.92e-02;// b = zeros(4,1); //stimato sensore forza
 //                  float ControlToActControl_T = 1.49e-02; //prova
-                  float Mass_quadrotor = 2.4259; // no battery
+//                  float Mass_quadrotor = 2.4259; // no battery
 //                  float Mass_quadrotor = 3.2259; // con battery
-		  float gravity_compensation = -1.0f*9.81f*Mass_quadrotor*ControlToActControl_T;
+//		  float gravity_compensation = -1.0f*9.81f*Mass_quadrotor*ControlToActControl_T;
 					//reset integrale se appena attivato offboard
 					if(_control_mode.flag_control_offboard_enabled){
 						if(reset_int_flag){
-							printf("reset integrale\n");
-							thrust_int(0) = 0.0f;
-							thrust_int(1) = 0.0f;
-							thrust_int(2) = _thrust_sp_prev(2)-gravity_compensation;
-							reset_int_flag=false;
+							//printf("reset integrale\n");
+							//thrust_int(0) = 0.0f;
+							//thrust_int(1) = 0.0f;
+							//thrust_int(2) = _thrust_sp_prev(2)-gravity_compensation;
+
+							//reset_int_flag=false;
 						}
 					}
 
@@ -1624,13 +1656,13 @@ MulticopterPositionControl::task_main()
 
 				//GM*	NB la z non è toccata
 				math::Vector<3> Kpv;
-				Kpv(0) = 2.3f; //1.5f; //migliore per ora
-				Kpv(1) = 2.3f; //1.5f;
-				Kpv(2) = 2.0f; // 2.5f;//_params.vel_p(2);
+				Kpv(0) = 2.0f; //1.5f; //migliore per ora
+				Kpv(1) = 2.0f; //1.5f;
+				Kpv(2) = 1.0f; // 2.5f;//_params.vel_p(2);
 				math::Vector<3> Kiv;
-				Kiv(0) = 0.65f; //0.8f
-				Kiv(1) = 0.65f; //0.8f
-				Kiv(2) = 0.46f;//0.625f _params.vel_i(2);
+				Kiv(0) = 0.6f; //0.8f
+				Kiv(1) = 0.6f; //0.8f
+				Kiv(2) = 0.6f;//0.46f // 0.625f _params.vel_i(2);
 				math::Vector<3> Kdv;
 				Kdv(0) = 0.0f;
 				Kdv(1) = 0.0f;

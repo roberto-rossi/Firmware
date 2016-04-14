@@ -184,6 +184,7 @@ private:
 	math::Matrix<3, 3>  _I;				/**< identity matrix */
 
     math::Vector<3>	    euler_angles_sp_prev;
+    math::Vector<3>	    _euler_angles_sp_dot_prev;
 
 	struct {
 		param_t roll_p;
@@ -758,15 +759,21 @@ MulticopterAttitudeControl::control_attitude(float dt)
 
 //GM*
 	math::Vector<3> Kpp;
-	Kpp(0) = 6.0f;
-	Kpp(1) = 6.0f;
+	Kpp(0) = 5.0f;
+	Kpp(1) = 5.0f;
 	Kpp(2) = 2.0f;
 	math::Vector<3> Kff_pv;
-	Kff_pv(0) = 0.5f;
-	Kff_pv(1) = 0.5f;
-	Kff_pv(2) = 0.5f;
+	Kff_pv(0) = 0.3f;
+	Kff_pv(1) = 0.3f;
+	Kff_pv(2) = 0.3f;
 
-	math::Vector<3> _euler_angles_sp_ff = Kff_pv.emult(euler_angles + e_R - euler_angles_sp_prev)/dt;
+    float tau_der_att = 0.01;
+    math::Vector<3> _euler_angles_sp_dot = (_euler_angles_sp_dot_prev*tau_der_att + euler_angles + e_R - euler_angles_sp_prev)/(tau_der_att+dt);
+    _euler_angles_sp_dot_prev = _euler_angles_sp_dot;
+    math::Vector<3> _euler_angles_sp_ff = Kff_pv.emult(_euler_angles_sp_dot);
+
+	//math::Vector<3> _euler_angles_sp_ff = Kff_pv.emult(euler_angles + e_R - euler_angles_sp_prev)/dt;
+
     euler_angles_sp_prev = euler_angles + e_R;
 	_rates_sp = Kpp.emult(e_R) + _euler_angles_sp_ff;
 
@@ -822,12 +829,12 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
 	math::Vector<3> ControlToActControl_tau(6.53e-02,1.624e-01,5.376e-01);
 	math::Vector<3> Kpv;
-	Kpv(0) = 20.0f;
-	Kpv(1) = 25.0f;
-	Kpv(2) = 20.0f;
+	Kpv(0) = 18.0f;
+	Kpv(1) = 24.0f;
+	Kpv(2) = 10.0f;
 	math::Vector<3> Kiv;
-	Kiv(0) = 40.0f; // 46.87f;//62.5f;
-	Kiv(1) = 70.0f; // 46.87f;//62.5f;
+	Kiv(0) = 130.0f; // 46.87f;//62.5f;
+	Kiv(1) = 400.0f; // 46.87f;//62.5f;
 	Kiv(2) = 30.0f;
 	math::Vector<3> Kdv;
 	Kdv(0) = 0.0f;//02f;
@@ -1023,6 +1030,7 @@ MulticopterAttitudeControl::task_main()
 	fds[0].events = POLLIN;
 
     euler_angles_sp_prev.zero(); // RR*
+    _euler_angles_sp_dot_prev.zero();
 
 	while (!_task_should_exit) {
 
