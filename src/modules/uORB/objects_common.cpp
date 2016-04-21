@@ -307,4 +307,7 @@ ORB_DEFINE(csi_dot, struct csi_dot_s);
 
 #include "topics/polimi_attitude_ned.h"
 ORB_DEFINE(polimi_attitude_ned, struct polimi_attitude_ned_s);
+
+#include "topics/dynamixel_state.h"
+ORB_DEFINE(dynamixel_state, struct dynamixel_state_s);
 //FINE MODIFICA

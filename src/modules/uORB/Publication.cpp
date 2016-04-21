@@ -63,6 +63,7 @@
 #include "topics/csi.h"
 #include "topics/csi_dot.h"
 #include "topics/polimi_attitude_ned.h"
+#include "topics/dynamixel_state.h"
 //FINE MODIFICA
 
 #include <px4_defines.h>
@@ -146,6 +147,7 @@ template class __EXPORT Publication<csi_dot_r_s>;
 template class __EXPORT Publication<csi_s>;
 template class __EXPORT Publication<csi_dot_s>;
 template class __EXPORT Publication<polimi_attitude_ned_s>;
+template class __EXPORT Publication<dynamixel_state_s>;
 //FINE MODIFICA
 
 }

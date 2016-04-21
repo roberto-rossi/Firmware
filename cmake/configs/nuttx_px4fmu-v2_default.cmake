@@ -81,18 +81,18 @@ set(config_module_list
 	# Too high RAM usage due to static allocations
 	# modules/attitude_estimator_ekf
 	modules/attitude_estimator_q
-	modules/ekf_att_pos_estimator
+	#modules/ekf_att_pos_estimator
 	modules/position_estimator_inav
 
 	#
 	# Vehicle Control
 	#
 	# modules/segway # XXX Needs GCC 4.7 fix
-	modules/fw_pos_control_l1
-	modules/fw_att_control
+	#modules/fw_pos_control_l1
+	#modules/fw_att_control
 	modules/mc_att_control
 	modules/mc_pos_control
-	modules/vtol_att_control
+	#modules/vtol_att_control
 
 	#
 	# Logging
@@ -138,7 +138,7 @@ set(config_module_list
 	#
 	# Rover apps
 	#
-	examples/rover_steering_control
+	#examples/rover_steering_control
 
 	#
 	# Demo apps
@@ -147,6 +147,9 @@ set(config_module_list
 	# Tutorial code from
 	# https://px4.io/dev/px4_simple_app
 	#examples/px4_simple_app
+
+	# DYNAMIXEL DAEMON! 
+	examples/dynamixel_daemon
 
 	# Tutorial code from
 	# https://px4.io/dev/daemon

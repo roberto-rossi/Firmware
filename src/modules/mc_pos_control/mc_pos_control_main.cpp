@@ -90,7 +90,8 @@
 #include <controllib/block/BlockParam.hpp>
 //GM*
 #include <uORB/topics/csi.h>
-//#include <uORB/topics/csi_dot.h>
+#include <uORB/topics/dynamixel_state.h>
+#include <uORB/topics/csi_dot.h>
 
 #define TILT_COS_MAX	0.7f
 #define SIGMA			0.000001f
@@ -144,8 +145,11 @@ private:
 	int		_local_pos_sp_sub;		/**< offboard local position setpoint */
 	int		_global_vel_sp_sub;		/**< offboard global velocity setpoint */
 
+
+    int     _attitude_sub;
 	int		_csi_sub;			/**< csi */
-//	int		_csi_dot_sub;			/**< csi_dot */
+	int		_csi_dot_sub;			/**< csi_dot */
+    int     _dynamixel_state_sub;
 
 	orb_advert_t	_att_sp_pub;			/**< attitude setpoint publication */
 	orb_advert_t	_local_pos_sp_pub;		/**< vehicle local position setpoint publication */
@@ -167,8 +171,10 @@ private:
 	struct vehicle_local_position_setpoint_s	_local_pos_sp;		/**< vehicle local position setpoint */
 	struct vehicle_global_velocity_setpoint_s	_global_vel_sp;		/**< vehicle global velocity setpoint */
 
+    struct vehicle_attitude_s     _vehicle_attitude;
 	struct csi_s					_csi;
-// struct csi_dot_s				_csi_dot;
+    struct csi_dot_s				_csi_dot;
+    struct dynamixel_state_s        _dynamixel_state;
 
 	control::BlockParamFloat _manual_thr_min;
 	control::BlockParamFloat _manual_thr_max;
@@ -379,8 +385,12 @@ MulticopterPositionControl::MulticopterPositionControl() :
 	_local_pos_sub(-1),
 	_pos_sp_triplet_sub(-1),
 	_global_vel_sp_sub(-1),
+
+	// DECENTRALIZZATO
+	_attitude_sub(-1),
 	_csi_sub(-1),
-//	_csi_dot_sub(-1),
+	_csi_dot_sub(-1),
+    _dynamixel_state_sub(-1),
 
 	/* publications */
 	_att_sp_pub(nullptr),
@@ -425,8 +435,11 @@ MulticopterPositionControl::MulticopterPositionControl() :
 
 	memset(&_ref_pos, 0, sizeof(_ref_pos));
 
+
+    memset(&_vehicle_attitude, 0, sizeof(_vehicle_attitude));
 	memset(&_csi, 0, sizeof(_csi));
-//	memset(&_csi_dot, 0, sizeof(_csi_dot));
+	memset(&_csi_dot, 0, sizeof(_csi_dot));
+	memset(&_dynamixel_state, 0, sizeof(_dynamixel_state));
 
 	_params.pos_p.zero();
 	_params.vel_p.zero();
@@ -1159,7 +1172,8 @@ MulticopterPositionControl::task_main()
 	_global_vel_sp_sub = orb_subscribe(ORB_ID(vehicle_global_velocity_setpoint));
 
 	_csi_sub = orb_subscribe(ORB_ID(csi));
-//	_csi_dot_sub = orb_subscribe(ORB_ID(csi_dot));
+	_csi_dot_sub = orb_subscribe(ORB_ID(csi_dot));
+    _dynamixel_state_sub = orb_subscribe(ORB_ID(dynamixel_state));
 
 	parameters_update(true);
 
@@ -1401,16 +1415,16 @@ MulticopterPositionControl::task_main()
 
 				//GM*
 				math::Vector<3> Kpp;
-				Kpp(0) = 0.3f;//0.3
-				Kpp(1) = 0.3f;
-				Kpp(2) = 0.3f; // 0.2f;// _params.pos_p(2);
+				Kpp(0) = 0.2f;//0.3
+				Kpp(1) = 0.2f;
+				Kpp(2) = 0.2f; // 0.2f;// _params.pos_p(2);
 
                 math::Vector<3> Kff_p;
-                Kff_p(0) = 0.0f;
-                Kff_p(1) = 0.0f;
-                Kff_p(2) = 0.0f;
+                Kff_p(0) = 0.15f;
+                Kff_p(1) = 0.15f;
+                Kff_p(2) = 0.15f;
 
-                float tau_der_p = 0.2;
+                float tau_der_p = 0.4;
                 math::Vector<3> pos_sp_dot = (pos_sp_dot_prev*tau_der_p + _pos_sp - pos_sp_prev)/(tau_der_p+dt);//RR*
                 pos_sp_prev = _pos_sp;
                 pos_sp_dot_prev = pos_sp_dot;
@@ -1430,13 +1444,19 @@ MulticopterPositionControl::task_main()
 					_vel_sp(2) = (_pos_sp(2) - _pos(2)) * Kpp(2) + vel_sp_ff(2);
 				}
 
+
+
+
 //GM*
-			_csi.csi[0]=_pos(0);
-			_csi.csi[1]=_pos(1);
-			_csi.csi[2]=_pos(2);
-            _csi.csi[3]=_pos_sp(0);
-			_csi.csi[4]=_pos_sp(1);
-			_csi.csi[5]=_pos_sp(2);
+//			_csi.csi[0]=_pos(0);
+//			_csi.csi[1]=_pos(1);
+//			_csi.csi[2]=_pos(2);
+//            _csi.csi[3]=_pos_sp(0);
+//			_csi.csi[4]=_pos_sp(1);
+//			_csi.csi[5]=_pos_sp(2);
+
+
+
 			//_csi_dot.csi_dot[0]=_pos_sp(0);
 			//_csi_dot.csi_dot[1]=_pos_sp(1);
 			//_csi_dot.csi_dot[2]=_pos_sp(2);
@@ -1596,7 +1616,7 @@ MulticopterPositionControl::task_main()
 					}
 
 					/* velocity error */
-					float tau_der_v = 0.15;
+					float tau_der_v = 0.10;
 					math::Vector<3> AM_vel = (AM_vel_prev*tau_der_v + _pos - _pos_prev)/(tau_der_v+dt);//RR*
                     AM_vel_prev  = AM_vel;
                     _pos_prev = _pos;
@@ -1617,17 +1637,62 @@ MulticopterPositionControl::task_main()
 			//_csi.csi[6]=    _vel(0);
 			//_csi.csi[7]=    _vel(1);
 			//_csi.csi[8]=    _vel(2);
-			_csi.csi[6]=    AM_vel(0);
-			_csi.csi[7]=    AM_vel(1);
-			_csi.csi[8]=    AM_vel(2);
+			//_csi.csi[6]=    AM_vel(0);
+			//_csi.csi[7]=    AM_vel(1);
+			//_csi.csi[8]=    AM_vel(2);
 
-			_csi.csi[9]=    _vel_sp(0);
-			_csi.csi[10]=   _vel_sp(1);
+			//_csi.csi[9]=    _vel_sp(0);
+			//_csi.csi[10]=   _vel_sp(1);
 			//_csi.csi[11]=_vel_sp(2);
 
 			//_csi_dot.csi_dot[3]=_vel_sp(0);
 			//_csi_dot.csi_dot[4]=_vel_sp(1);
 			//_csi_dot.csi_dot[5]=_vel_sp(2);
+
+// NUOVO DECENTRALIZZATO
+
+        bool updated;
+        orb_check(_attitude_sub, &updated);
+        if (updated) {
+            orb_copy(ORB_ID(vehicle_attitude), _attitude_sub, &_vehicle_attitude);
+        }
+        orb_check(_dynamixel_state_sub, &updated);
+        if (updated) {
+            orb_copy(ORB_ID(dynamixel_state), _dynamixel_state_sub, &_dynamixel_state);
+        }
+
+        //Copia valori di attitude nella variabile csi
+        _csi.csi[0]= _pos(0);//_local_pos.x;
+        _csi.csi[1]= _pos(1);//_local_pos.y;
+        _csi.csi[2]= _pos(2);//_local_pos.z;
+        _csi.csi[3]= _vehicle_attitude.roll;
+        _csi.csi[4]= _vehicle_attitude.pitch;
+        _csi.csi[5]= _vehicle_attitude.yaw; // !!!
+
+        _csi.csi[6]= _dynamixel_state.q[0];
+        _csi.csi[7]= _dynamixel_state.q[1];
+        _csi.csi[8]= _dynamixel_state.q[2];
+        _csi.csi[9]= _dynamixel_state.q[3];
+        _csi.csi[10]=_dynamixel_state.q[4];
+        //_csi_dot.csi_dot[0]= 0.0f; //_local_pos.vx;
+        //_csi_dot.csi_dot[1]= 0.0f; //_local_pos.vy;
+        //_csi_dot.csi_dot[2]= 0.0f; //_local_pos.vz;
+
+
+        //_csi_dot.csi_dot[0]=_vel(0); //0.0f; //_local_pos.vx;
+        //_csi_dot.csi_dot[1]=_vel(1);//0.0f; //_local_pos.vy;
+        //_csi_dot.csi_dot[2]=_vel(2);//0.0f; //_local_pos.vz;
+        _csi_dot.csi_dot[0]=AM_vel(0); //0.0f; //_local_pos.vx;
+        _csi_dot.csi_dot[1]=AM_vel(1);//0.0f; //_local_pos.vy;
+        _csi_dot.csi_dot[2]=AM_vel(2);//0.0f; //_local_pos.vz;
+        _csi_dot.csi_dot[3]=_vehicle_attitude.rollspeed;
+        _csi_dot.csi_dot[4]=_vehicle_attitude.pitchspeed;
+        _csi_dot.csi_dot[5]=_vehicle_attitude.yawspeed;
+        _csi_dot.csi_dot[6]=_dynamixel_state.q_dot[0];
+        _csi_dot.csi_dot[7]=_dynamixel_state.q_dot[1];
+        _csi_dot.csi_dot[8]=_dynamixel_state.q_dot[2];
+        _csi_dot.csi_dot[9]=_dynamixel_state.q_dot[3];
+        _csi_dot.csi_dot[10]=_dynamixel_state.q_dot[4];
 
 					/* thrust vector in NED frame */
 					// TODO?: + _vel_sp.emult(_params.vel_ff)
@@ -1660,9 +1725,9 @@ MulticopterPositionControl::task_main()
 				Kpv(1) = 2.0f; //1.5f;
 				Kpv(2) = 1.0f; // 2.5f;//_params.vel_p(2);
 				math::Vector<3> Kiv;
-				Kiv(0) = 0.6f; //0.8f
-				Kiv(1) = 0.6f; //0.8f
-				Kiv(2) = 0.6f;//0.46f // 0.625f _params.vel_i(2);
+				Kiv(0) = 1.2f; //0.8f
+				Kiv(1) = 1.2f; //0.8f
+				Kiv(2) = 0.5f;//0.46f // 0.625f _params.vel_i(2);
 				math::Vector<3> Kdv;
 				Kdv(0) = 0.0f;
 				Kdv(1) = 0.0f;
