@@ -247,12 +247,13 @@ private:
     const float Kpp_alpha =  2.4f;
     const float Kpv_alpha = 12.0f;
     const float Kiv_alpha = 48.0f;
+    const float Kff_alpha   =  0.3f;
 
     float det_Tbetaw;
 //    const float Kp_alpha_pos = 2.0f;
 //    const float Kp_alpha = 15.0f;
 //    const float Ki_alpha =  40.0f; //10.0f;
-    const float W_w2beta = 0.1f;
+    const float W_w2beta = 0.3f;
     /** MC* ...........*/
 
 	orb_advert_t	_v_rates_sp_pub;		/**< rate setpoint publication */
@@ -946,33 +947,15 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
     Bww.set_row(1,Bww_r2);
     Bww.set_row(2,Bww_r3);
 
-	math::Vector<3> Kpv;
-	Kpv(0) = 20.0f;
-	Kpv(1) = 25.0f;
-	Kpv(2) = 20.0f;
-	math::Vector<3> Kiv;
-	Kiv(0) = 40.0f; // 46.87f;//62.5f;
-	Kiv(1) = 70.0f; // 46.87f;//62.5f;
-	Kiv(2) = 30.0f;
-	math::Vector<3> Kdv;
-	Kdv(0) = 0.0f;//02f;
-	Kdv(1) = 0.0f;//02f;
-	Kdv(2) = 0.0f;
-	math::Vector<3> Kffv;
-	Kffv(0) = 0.0f;
-	Kffv(1) = 0.0f;
-	Kffv(2) = 0.0f;
-
     /** Accelerazioni */
-    math::Vector<3> am_att_control_acc_pd = Kpv.emult(rates_err) + Kdv.emult(_rates_prev - rates)/dt + Kffv.emult(_rates_sp - _rates_sp_prev) / dt;
-	//math::Vector<3> am_att_control_acc_pd = _params.rate_p.emult(rates_err)* 1.25f +  _params.rate_d.emult(_rates_prev - rates) / dt + _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
+	math::Vector<3> am_att_control_acc_pd = _params.rate_p.emult(rates_err) +  _params.rate_d.emult(_rates_prev - rates) / dt + _params.rate_ff.emult(_rates_sp - _rates_sp_prev) / dt;
 
     /** add to integral action?*/
-    math::Vector<3> am_att_control_acc_i_add = Kiv.emult(rates_err) * dt; // _params.rate_i.emult(rates_err) * dt * 1.5625f;
-    math::Vector<2> am_omega_xy_dot_ref_int_add;
+    math::Vector<3> _att_control_acc_i_add =  _params.rate_i.emult(rates_err) * dt;
 
-    am_omega_xy_dot_ref_int_add(0) = am_att_control_acc_i_add(0);
-    am_omega_xy_dot_ref_int_add(1) = am_att_control_acc_i_add(1);
+    math::Vector<2> am_omega_xy_dot_ref_int_add;
+    am_omega_xy_dot_ref_int_add(0) = _att_control_acc_i_add(0);
+    am_omega_xy_dot_ref_int_add(1) = _att_control_acc_i_add(1);
 
     am_omega_xy_dot_ref(0) = am_att_control_acc_pd(0) + am_att_control_acc_i(0);
     am_omega_xy_dot_ref(1) = am_att_control_acc_pd(1) + am_att_control_acc_i(1);
@@ -986,6 +969,10 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
             err_omega_alpha_int.zero();
             alpha_dot_int.zero();
             alpha_dot_int_add.zero();
+            am_u_tbeta.zero();
+            am_u_tbeta_int_add.zero();
+            beta.zero();
+            beta_p.zero();
             reset_int_flag = false;
             }
 
@@ -1138,7 +1125,7 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 				//float rate_i = _rates_int(i) + ControlToActControl_tau(i) * _params.rate_i(i) * rates_err(i) * dt;
 				float rate_i = _rates_int(i);
 				for (int j = 0; j < 3; j++) {
-                     rate_i += ControlToActControl_tau(i) * (Bww(i,j)*am_att_control_acc_i_add(j));
+                     rate_i += ControlToActControl_tau(i) * (Bww(i,j)*_att_control_acc_i_add(j));
                      //rate_i += (Bww(i,j)*_att_control_acc_i(j));
                 }
                 /** RR* .................... */
@@ -1299,57 +1286,32 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
 
 
 /** Calcola le tau_beta_in con Bb_tb_i, Bb_tb_i_pinv, g. */
-//    for (int i = 0; i < 6; ++i) {
-//        am_tau_beta_in(i) = am_u_tbeta(i+2); //am_Bb_tb_i_pinv*(am_u_tbeta + am_Bt_tb_i*am_g_t);
-//    }
-
-//    am_T_betaw_sq = am_T_betaw_t*am_T_betaw;
-//    am_T_betaw_sq_inv(0,0) = am_T_betaw_sq(1,1); am_T_betaw_sq_inv(0,1) = -am_T_betaw_sq(0,1);
-//    am_T_betaw_sq_inv(1,0) = -am_T_betaw_sq(1,0); am_T_betaw_sq_inv(1,1) = am_T_betaw_sq(0,0);
-//    det_Tbetaw = (am_T_betaw_sq(0,0)*am_T_betaw_sq(1,1))-(am_T_betaw_sq(1,0)*am_T_betaw_sq(0,1));
-//    am_T_betaw_sq_inv = am_T_betaw_sq_inv/det_Tbetaw;
 
     /* construct attitude setpoint rotation matrix */
     math::Matrix<3, 3> R_sp;
     R_sp.set(_v_att_sp.R_body);
-    math::Vector<3> am_rpy_sp;
+    math::Vector<3>am_rpy_sp;
     am_rpy_sp = R_sp.to_euler();
 
 
-    am_phi_xy_r(0)= am_rpy_sp(0); //_csi.csi[3];
-    am_phi_xy_r(1)= 0.0f; //am_rpy_sp(1); //_csi.csi[4];
+    am_phi_xy_r(0)=  am_rpy_sp(0); // _csi.csi[3]; //
+    am_phi_xy_r(1)=  am_rpy_sp(1); //_csi.csi[4];
 
-    omega_xy_r(0)= _rates_sp(0);//_ctrl_state.roll_rate;
-    omega_xy_r(1)= 0.0f; //_rates_sp(1);//_ctrl_state.pitch_rate;
+    omega_xy_r(0)=  _rates_sp(0); // _ctrl_state.roll_rate; //
+    omega_xy_r(1)=  _rates_sp(1);//_ctrl_state.pitch_rate;
 
     alpha_p = alpha_p0 - beta_p;
+
     alpha_fb = (-am_T_betaw*am_phi_xy_r - alpha_p)*Kpp_alpha;
-    err_alpha = beta - alpha_0 - am_T_betaw*omega_xy_r + alpha_fb;
+    err_alpha = beta - alpha_0 - am_T_betaw*omega_xy_r*Kff_alpha + alpha_fb;
     alpha_dot_int_add = err_alpha*Kiv_alpha*dt;
     alpha_dot = err_alpha*Kpv_alpha + alpha_dot_int;
     alpha_dot_int += alpha_dot_int_add;
 
     for (int i = 0; i < 6; ++i) {
-        am_u_tbeta(i+2) += alpha_dot(i)*0.0f; // ATTENZIONE! LEVATO ALPHA!
+        am_u_tbeta(i+2) += alpha_dot(i);
     }
 
-//    //err_omega_csi = phi_r - am_T_betaw_sq_inv*am_T_betaw_t*csi_alpha; //usa riferimento, non valore attuale
-//    //omega_alpha_fb = Kp_w_alpha*err_omega_csi;
-//    err_omega_alpha_pos = (-am_phi_xy_r - am_T_betaw_sq_inv*am_T_betaw_t*alpha_pos)*Kp_alpha_pos;
-//
-//    err_omega_alpha = err_omega_alpha_pos - omega_xy_r - am_T_betaw_sq_inv*am_T_betaw_t*alpha;
-//
-//    err_omega_alpha_int_add = err_omega_alpha*Ki_alpha*dt;
-//
-//    am_u_tbeta_aux = am_T_betaw*(err_omega_alpha*Kp_alpha+err_omega_alpha_int);
-//
-//    //if (!_am_flag.am_saturation_utb_tau_quad && !_am_flag.am_saturation_utb_tau_robot && !_am_flag.am_saturation_utb_thrust){
-//        err_omega_alpha_int += err_omega_alpha_int_add;
-//    //}
-//
-//    for (int i = 0; i < 6; ++i) {
-//        am_u_tbeta(i+2) += am_u_tbeta_aux(i);
-//    }
 
     am_tau_beta_in = am_Bb_tb_i_pinv*(am_u_tbeta + am_Bt_tb_i*am_g_t);
 
@@ -1366,7 +1328,7 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
     /** Calcola le tb_dot_ref con Bb_tb_i, Bt_tb_i, g, tau_beta_in. */
     am_beta_dot_ref = am_Bb_tb_i.transposed()*am_effec_tau;
 
-    am_omega_xy_dot_ref(1) = 0; // !!!
+    // am_omega_xy_dot_ref(1) = 0;
 
     /** Tau_beta = tau_b_inertia + (C_betav + g_beta) + (B_betaw * omega_dot_ref) */
     am_tau_beta = am_g_beta + am_tau_beta_in + am_B_betaw*am_omega_xy_dot_ref;
@@ -1410,7 +1372,7 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
 //    printf("\n");
 
     /** Tau_omega_xy = (B_ww * omega_dot_ref_xy) + (B_wbeta * beta_dot_ref) + (C_wv + g_w) */
-    am_tau_omega_xy = am_B_ww*am_omega_xy_dot_ref + (am_B_wbeta*am_beta_dot_ref) +  am_g_w;
+    am_tau_omega_xy = am_B_ww*am_omega_xy_dot_ref + (am_B_wbeta*am_beta_dot_ref)*W_w2beta +  am_g_w;
 
     am_T_betaw_t = am_T_betaw.transposed();
 
@@ -1422,8 +1384,8 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
 
     /** Restituisce Tau_quad*/
 
-            am_tau_quad(0)  =   ControlToActControl_tau(0)*am_tau_omega_xy(0);
-            am_tau_quad(1)  =   ControlToActControl_tau(1)*am_tau_omega_xy(1);
+        am_tau_quad(0)  =   ControlToActControl_tau(0)*am_tau_omega_xy(0);
+        am_tau_quad(1)  =   ControlToActControl_tau(1)*am_tau_omega_xy(1);
 
         /** Tau_omega_xy_0 = Tau_omega_xy + T_bw^T * Tau_beta; */
         for (int j = 0; j < 6; j++) {
@@ -1431,9 +1393,8 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
             am_tau_quad(1) += ControlToActControl_tau(1)*am_T_betaw_t(1,j)*am_tau_beta(j);
         }
 
-        //am_tau_quad(1) = 0.0f; //!!!
+        // am_tau_quad(1) = 0.0f;
 
-     //am_tau_beta_rm = am_B_betaw*am_omega_xy_dot_ref*(1.0f-W_w2beta);
     am_tau_beta -= am_B_betaw*am_omega_xy_dot_ref*(1.0f-W_w2beta);
 
     /** Restituisce Thrust*/
@@ -1812,7 +1773,7 @@ MulticopterAttitudeControl::task_main()
 				_actuators.control[0] = (PX4_ISFINITE(_att_control(0))) ? _att_control(0) : 0.0f;
 				_actuators.control[1] = (PX4_ISFINITE(_att_control(1))) ? _att_control(1) : 0.0f;
 				_actuators.control[2] = (PX4_ISFINITE(_att_control(2))) ? _att_control(2) : 0.0f;
-				_actuators.control[3] = (PX4_ISFINITE(_thrust_sp)) ? _thrust_sp : 0.0f;
+				_actuators.control[3] = 0.25f; // (PX4_ISFINITE(_thrust_sp)) ? _thrust_sp : 0.0f;
 				_actuators.timestamp = hrt_absolute_time();
 				_actuators.timestamp_sample = _ctrl_state.timestamp;
 

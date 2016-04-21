@@ -188,8 +188,8 @@ private:
     math::Vector<8> am_err_v;
 
     float Kpp =  0.2f; //1.0f;
-    float Kpv =  1.0f; //10.0f;
-    float Kiv =  0.2f; //20.0f;
+    float Kpv =  2.0f; //10.0f;
+    float Kiv =  0.65f; //20.0f;
 
     //float csi_dot_lp[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     //float csi_dot_lp_old[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -212,6 +212,9 @@ private:
     math::Vector<6> beta_p_2old;
     math::Vector<6> beta_p_r;
     math::Vector<6> beta_p_r_old;
+
+    math::Vector<3> AM_vel_prev; // RR*
+    math::Vector<3> _pos_prev;
 
     hrt_abstime Ts_prev;
 
@@ -1302,6 +1305,11 @@ MulticopterPositionControl::task_main()
 	math::Matrix<3, 3> R;
 	R.identity();
 
+	// RR* //
+    _pos_prev.zero();
+    AM_vel_prev.zero();
+    // RR* //
+
 	/* wakeup source */
 	px4_pollfd_struct_t fds[1];
 
@@ -1370,15 +1378,23 @@ MulticopterPositionControl::task_main()
 				_pos(0) = _local_pos.x;
 				_pos(1) = _local_pos.y;
 				_pos(2) = _local_pos.z;
+
+                float tau_der_v = 0.15;
+                math::Vector<3> AM_vel = (AM_vel_prev*tau_der_v + _pos - _pos_prev)/(tau_der_v+dt);//RR*
+                AM_vel_prev  = AM_vel;
+                _pos_prev = _pos;
+
+                _vel = AM_vel; //RR*
 			}
 
 			if (PX4_ISFINITE(_local_pos.vx) &&
 				PX4_ISFINITE(_local_pos.vy) &&
 				PX4_ISFINITE(_local_pos.vz)) {
 
-				_vel(0) = _local_pos.vx;
-				_vel(1) = _local_pos.vy;
-				_vel(2) = _local_pos.vz;
+				//_vel(0) = _local_pos.vx; //RR*
+				//_vel(1) = _local_pos.vy; //RR*
+				//_vel(2) = _local_pos.vz; //RR*
+
 			}
 
 			_vel_err_d(0) = _vel_x_deriv.update(-_vel(0));
@@ -1407,23 +1423,29 @@ MulticopterPositionControl::task_main()
         }
 
         //Copia valori di attitude nella variabile csi
-        _csi.csi[0]= 0.0f; //_local_pos.x;
-        _csi.csi[1]= 0.0f; //_local_pos.y;
-        _csi.csi[2]= 0.0f; //_local_pos.z;
-        _csi.csi[3]=_vehicle_attitude.roll;
-        _csi.csi[4]= 0.0f; //_vehicle_attitude.pitch;
-        _csi.csi[5]= 0.0f; //_vehicle_attitude.yaw; !!!
-        _csi.csi[6]=_dynamixel_state.q[0];
-        _csi.csi[7]=_dynamixel_state.q[1];
-        _csi.csi[8]=_dynamixel_state.q[2];
-        _csi.csi[9]=_dynamixel_state.q[3];
+        _csi.csi[0]= _local_pos.x;
+        _csi.csi[1]= _local_pos.y;
+        _csi.csi[2]= _local_pos.z;
+        _csi.csi[3]= _vehicle_attitude.roll;
+        _csi.csi[4]= _vehicle_attitude.pitch;
+        _csi.csi[5]= _vehicle_attitude.yaw; // !!!
+
+        _csi.csi[6]= _dynamixel_state.q[0];
+        _csi.csi[7]= _dynamixel_state.q[1];
+        _csi.csi[8]= _dynamixel_state.q[2];
+        _csi.csi[9]= _dynamixel_state.q[3];
         _csi.csi[10]=_dynamixel_state.q[4];
-        _csi_dot.csi_dot[0]= 0.0f; //_local_pos.vx;
-        _csi_dot.csi_dot[1]= 0.0f; //_local_pos.vy;
-        _csi_dot.csi_dot[2]= 0.0f; //_local_pos.vz;
+        //_csi_dot.csi_dot[0]= 0.0f; //_local_pos.vx;
+        //_csi_dot.csi_dot[1]= 0.0f; //_local_pos.vy;
+        //_csi_dot.csi_dot[2]= 0.0f; //_local_pos.vz;
+
+
+        _csi_dot.csi_dot[0]=_vel(0); //0.0f; //_local_pos.vx;
+        _csi_dot.csi_dot[1]=_vel(1);//0.0f; //_local_pos.vy;
+        _csi_dot.csi_dot[2]=_vel(2);//0.0f; //_local_pos.vz;
         _csi_dot.csi_dot[3]=_vehicle_attitude.rollspeed;
-        _csi_dot.csi_dot[4]= 0.0f; //_vehicle_attitude.pitchspeed;
-        _csi_dot.csi_dot[5]= 0.0f; //_vehicle_attitude.yawspeed;
+        _csi_dot.csi_dot[4]=_vehicle_attitude.pitchspeed;
+        _csi_dot.csi_dot[5]=_vehicle_attitude.yawspeed;
         _csi_dot.csi_dot[6]=_dynamixel_state.q_dot[0];
         _csi_dot.csi_dot[7]=_dynamixel_state.q_dot[1];
         _csi_dot.csi_dot[8]=_dynamixel_state.q_dot[2];
@@ -1732,9 +1754,14 @@ MulticopterPositionControl::task_main()
 				                beta_p_r_old(i+1) = _csi.csi[i+5];
 				            }
 				            flag = 0;
+                            _pos_prev(0)    = _pos(0);//RR*
+							_pos_prev(1)    = _pos(1);//RR*
+				            _pos_prev(2)    = _pos(2);//RR*
 				            reset_int_flag = false;
 				            }
+
                         compute_utbeta();
+
                         bool updated;
                         orb_check(_am_flag_sub, &updated);
                         if (updated) {
@@ -2184,12 +2211,16 @@ MulticopterPositionControl::start()
 /** MC* ....................*/
 void MulticopterPositionControl::compute_utbeta()
 {
-    //Lettura uOrb
+    //Lettura uORB
     bool updated;
     orb_check(_T_bw_sub, &updated);
     if (updated) {
         orb_copy(ORB_ID(T_bw_matrix), _T_bw_sub, &_T_bw);
     }
+
+    hrt_abstime t = hrt_absolute_time();
+    float Ts = Ts_prev != 0 ? (t - Ts_prev) * 0.000001f : 0.02f;
+    Ts_prev = t;
 
 //    printf("csi_r: \n");
 //    for (size_t j = 0; j < 11; j++) {
@@ -2224,16 +2255,20 @@ void MulticopterPositionControl::compute_utbeta()
 //    }
 //    printf("\n");
 
-    _csi.csi[0]=0.0f; //_local_pos.x;
-    _csi.csi[1]=0.0f; //_local_pos.y;
-    _csi.csi[2]=0.0f; //_local_pos.z;
-    _csi.csi[4]=0.0f; //_vehicle_attitude.pitch;
-    _csi.csi[5]=0.0f; //_vehicle_attitude.yaw;
-    _csi_dot.csi_dot[0]=0.0f; //_local_pos.vx;
-    _csi_dot.csi_dot[1]=0.0f; //_local_pos.vy;
-    _csi_dot.csi_dot[2]=0.0f; //_local_pos.vz;
-    _csi_dot.csi_dot[4]=0.0f; //_vehicle_attitude.pitchspeed;
-    _csi_dot.csi_dot[5]=0.0f; //_vehicle_attitude.yawspeed;
+    //_csi.csi[0]=0.0f; //_local_pos.x;
+    //_csi.csi[1]=0.0f; //_local_pos.y;
+    //_csi.csi[2]=0.0f; //_local_pos.z;
+    //_csi.csi[4]=0.0f; //_vehicle_attitude.pitch;
+    //_csi.csi[5]=0.0f; //_vehicle_attitude.yaw;
+    //_csi_dot.csi_dot[0]=0.0f; //_local_pos.vx;
+    //_csi_dot.csi_dot[1]=0.0f; //_local_pos.vy;
+    //_csi_dot.csi_dot[2]=0.0f; //_local_pos.vz;
+    //_csi_dot.csi_dot[4]=0.0f; //_vehicle_attitude.pitchspeed;
+    //_csi_dot.csi_dot[5]=0.0f; //_vehicle_attitude.yawspeed;
+
+    // CORREZIONE ALLA VELOCITA'!
+
+
 
     for (int i = 0; i < 6; ++i) {
         for (int j = 0; j < 2; ++j) {
@@ -2250,6 +2285,7 @@ void MulticopterPositionControl::compute_utbeta()
     Ryaw_T(1,0) = -syaw;
     Ryaw_T(1,1) = cyaw;
     T_reduced.zero();
+
     for (int i = 0; i < 8; ++i) {
         for (int j = 0; j < 10; ++j) {
             if (i<2 && j<2){
@@ -2285,36 +2321,34 @@ void MulticopterPositionControl::compute_utbeta()
         am_csi_r_dot(i)=_csi_r_dot.csi_r_dot[i];
     }
 
-    hrt_abstime t = hrt_absolute_time();
-    float Ts = Ts_prev != 0 ? (t - Ts_prev) * 0.000001f : 0.02f;
-    Ts_prev = t;
+
 
     //Filtro passa basso solo per VROLL
     //const float tau_lp = 1/20.0f;
     //csi_dot_lp[3] = (csi_dot_lp_old[3]*tau_lp+_csi_dot.csi_dot[3]*Ts)/(Ts + tau_lp);
     //csi_dot_lp_old[3] = csi_dot_lp[3];
     //am_csi_dot(3) = csi_dot_lp[3];
-    am_csi_dot(3) = _csi_dot.csi_dot[3];
+    //am_csi_dot(3) = _csi_dot.csi_dot[3];
 
     //DOPPIO!!!
-    am_csi(3)=0.0f;
-    am_csi(4)=0.0f;
-    am_csi(5)=0.0f;
-    am_csi_dot(3)=0.0f;
-    am_csi_dot(4)=0.0f;
-    am_csi_dot(5)=0.0f;
-    am_csi_r(3) = 0.0f;
-    am_csi_r(4) = 0.0f;
-    am_csi_r_dot(3) = 0.0f;
-    am_csi_r_dot(4) = 0.0f;
+    //am_csi(3)=0.0f;
+    //am_csi(4)=0.0f;
+    //am_csi(5)=0.0f;
+    //am_csi_dot(3)=0.0f;
+    //am_csi_dot(4)=0.0f;
+    //am_csi_dot(5)=0.0f;
+    //am_csi_r(3) = 0.0f;
+    //am_csi_r(4) = 0.0f;
+    //am_csi_r_dot(3) = 0.0f;
+    //am_csi_r_dot(4) = 0.0f;
 
-   am_eta_r_fb = (T_reduced*(am_csi_r - am_csi))*Kpp;
+    am_eta_r_fb = (T_reduced*(am_csi_r - am_csi))*Kpp;
 
    //Blocco movimento giunti 1 e 2
 //   am_eta_r_fb(5) = (am_csi_r(7) - am_csi(7))*Kpp;
 //   am_eta_r_fb(6) = (am_csi_r(8) - am_csi(8))*Kpp;
 
-   am_eta = T_reduced*am_csi_dot;
+    am_eta = T_reduced*am_csi_dot;
 
     //Blocco movimento giunti 1 e 2
 //   am_eta(5) = am_csi_dot(7);
@@ -2355,12 +2389,12 @@ void MulticopterPositionControl::compute_utbeta()
     beta_p_old  = beta_p;
     beta_p_r_old = beta_p_r;
 
-    for (int i = 0; i < 6; ++i) {
-        am_u_tbeta_int_add(i+2) = 0.0f;
-        _am_u_tbeta.am_beta[i] = beta(i);
-        _am_u_tbeta.am_beta_p[i] = beta_p(i);
-        am_u_tbeta(i+2) = beta_dot(i);
-    }
+    //for (int i = 0; i < 6; ++i) {
+    //    am_u_tbeta_int_add(i+2) = 0.0f;
+    //    _am_u_tbeta.am_beta[i] = beta(i);
+    //    _am_u_tbeta.am_beta_p[i] = beta_p(i);
+    //    am_u_tbeta(i+2) = beta_dot(i);
+    //}
 
     for (int i = 0; i < 8; ++i) {
         _am_u_tbeta.am_u_tbeta[i]=am_u_tbeta(i);
