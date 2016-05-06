@@ -178,9 +178,11 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
     hrt_abstime Ts_prev = 0;
 //    const float  c_dev = 60.0f; //60;
 
-    double Kpp[5] = {4.0, 4.0, 4.0, 4.0, 4.0}; 		
-    double Kpv[5] = {0.5293, 0.35055, 0.5293, 0.5293, 0.5293}; 
-    double Kiv[5] = {0.936, 0.6199, 0.8268, 0.8268, 0.8268}; 
+    double Kpp[5] = {4.0, 4.0, 4.0, 4.0, 4.0};
+    double Kpv[5] = {0.5293, 0.35055, 0.5293, 0.5293, 0.5293};
+    //double Kpv[5] = {0.5293, 0.35055, 0.5293, 0.5293, 0.5293};
+    double Kiv[5] = {0.936, 0.6199, 0.8268, 0.8268, 0.8268};
+    //double Kiv[5] = {0.136, 0.6199, 0.8268, 0.8268, 0.8268};
     int bit_torque[5];
     //int reset_flag = 1;
 
@@ -224,7 +226,7 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
 
 	//Read position and speed from uOrb
         //Read cycle
-        for (int k = 1; k < 6; ++k) { 
+        for (int k = 1; k < 6; ++k) {
             state = dxl_read_state(k);
             if (dxl_get_result() != 1) {
                 printf( "[Dynamixel] Errore %d \n",dxl_get_result());
@@ -254,6 +256,12 @@ int dynamixel_daemon_thread_main(int argc, char *argv[])
                     torque[i] = 1.4;
                 if (torque[i] < -1.4)
                     torque[i] = -1.4;
+
+//                if (i == 0)
+//                {
+//                torque[i] = 0.0;
+//                }
+
                 //Salvo per passo successivo
                 torque_old[i]=torque[i];
                 err_v_old[i]=err_v[i];

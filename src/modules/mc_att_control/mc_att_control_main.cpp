@@ -185,6 +185,8 @@ private:
 
     math::Vector<3>	    euler_angles_sp_prev;
     math::Vector<3>	    _euler_angles_sp_dot_prev;
+    math::Vector<3>     am_dist_state;
+    math::Vector<3>     est_torque_dist;
 
 	struct {
 		param_t roll_p;
@@ -744,28 +746,36 @@ MulticopterAttitudeControl::control_attitude(float dt)
         math::Vector<3> euler_angles;
     euler_angles = R.to_euler();
 
-    _csi_dot.csi_dot[3]=euler_angles(0);
-    _csi_dot.csi_dot[4]=euler_angles(1);
-    _csi_dot.csi_dot[5]=euler_angles(2);
+    _csi_dot.csi_dot[0]=euler_angles(0);
+    _csi_dot.csi_dot[1]=euler_angles(1);
+    _csi_dot.csi_dot[2]=euler_angles(2);
+    _csi_dot.csi_dot[3]=_v_att_sp.roll_body;
+    _csi_dot.csi_dot[4]=_v_att_sp.pitch_body;
+    _csi_dot.csi_dot[5]=_v_att_sp.yaw_body;
 
-    _csi_dot.csi_dot[6]=_v_att_sp.roll_body;
-    _csi_dot.csi_dot[7]=_v_att_sp.pitch_body;
-    _csi_dot.csi_dot[8]=_v_att_sp.yaw_body;
+    //_csi_dot.csi_dot[9]=_thrust_sp;
+    //_csi_dot.csi_dot[3]=euler_angles(0);
+    //_csi_dot.csi_dot[4]=euler_angles(1);
+    //_csi_dot.csi_dot[5]=euler_angles(2);
+
+    //_csi_dot.csi_dot[6]=_v_att_sp.roll_body;
+    //_csi_dot.csi_dot[7]=_v_att_sp.pitch_body;
+    //_csi_dot.csi_dot[8]=_v_att_sp.yaw_body;
     //_csi_dot.csi_dot[9]=thrust_sp(2);
-    _csi_dot.csi_dot[9]=_thrust_sp;
+    //_csi_dot.csi_dot[9]=_thrust_sp;
 
 
 	/* calculate angular rates setpoint */
 
 //GM*
 	math::Vector<3> Kpp;
-	Kpp(0) = 5.0f;
-	Kpp(1) = 5.0f;
+	Kpp(0) = 4.0f;
+	Kpp(1) = 4.0f;
 	Kpp(2) = 2.0f;
 	math::Vector<3> Kff_pv;
-	Kff_pv(0) = 0.3f;
-	Kff_pv(1) = 0.3f;
-	Kff_pv(2) = 0.3f;
+	Kff_pv(0) = 0.15f;
+	Kff_pv(1) = 0.15f;
+	Kff_pv(2) = 0.0f;
 
     float tau_der_att = 0.01;
     math::Vector<3> _euler_angles_sp_dot = (_euler_angles_sp_dot_prev*tau_der_att + euler_angles + e_R - euler_angles_sp_prev)/(tau_der_att+dt);
@@ -789,7 +799,9 @@ MulticopterAttitudeControl::control_attitude(float dt)
 	}
 
 	/* feed forward yaw setpoint rate */
-	_rates_sp(2) += _v_att_sp.yaw_sp_move_rate * yaw_w * _params.yaw_ff;
+	if(!_v_control_mode.flag_control_offboard_enabled){
+        _rates_sp(2) += _v_att_sp.yaw_sp_move_rate * yaw_w * _params.yaw_ff;
+	}
 }
 
 /*
@@ -803,6 +815,9 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	/* reset integral if disarmed */
 	if (!_armed.armed || !_vehicle_status.is_rotary_wing) {
 		_rates_int.zero();
+        /** RR */
+        am_dist_state.zero();
+        est_torque_dist.zero();
 	}
 
 	/* current body angular rates */
@@ -814,8 +829,8 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 	/* angular rates error */
 	math::Vector<3> rates_err = _rates_sp - rates;
 
-    _polimi_attitude_ned.w=rates(0); // RR*
-    _polimi_attitude_ned.x=rates(1); // RR*
+    _polimi_attitude_ned.w= rates(0); // RR*
+    _polimi_attitude_ned.x= rates(1); // RR*
     _polimi_attitude_ned.y=_rates_sp(0); // RR*
     _polimi_attitude_ned.z=_rates_sp(1); // RR*
 
@@ -829,13 +844,13 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
 	math::Vector<3> ControlToActControl_tau(6.53e-02,1.624e-01,5.376e-01);
 	math::Vector<3> Kpv;
-	Kpv(0) = 18.0f;
-	Kpv(1) = 24.0f;
+	Kpv(0) = 20.0f; // 18.0f;
+	Kpv(1) = 20.0f; // 24.0f;
 	Kpv(2) = 10.0f;
 	math::Vector<3> Kiv;
-	Kiv(0) = 130.0f; // 46.87f;//62.5f;
-	Kiv(1) = 400.0f; // 46.87f;//62.5f;
-	Kiv(2) = 30.0f;
+	Kiv(0) = 10.0f;//130.0f; // 46.87f;//62.5f;
+	Kiv(1) = 10.0f;//400.0f; // 46.87f;//62.5f;
+	Kiv(2) = 4.0f;
 	math::Vector<3> Kdv;
 	Kdv(0) = 0.0f;//02f;
 	Kdv(1) = 0.0f;//02f;
@@ -859,28 +874,35 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
     // E METTERLE QUI
 
-	_att_control = _att_control_pd  + _rates_int ;
+	_att_control = _att_control_pd  + _rates_int + ControlToActControl_tau.emult(est_torque_dist);
+
+    float am_tdo_tf = 2.0f;
+
+    math::Vector<3> Jm_qdot = Bww*rates;
+    math::Vector<3> tau_actual; tau_actual = _att_control.edivide(ControlToActControl_tau);
+
+    math::Vector<3> am_dist_state_u = tau_actual + Jm_qdot/am_tdo_tf;
 
 	_rates_sp_prev = _rates_sp;
 	_rates_prev = rates;
 
-    _csi_dot.csi_dot[0]=_att_control(0);
-    _csi_dot.csi_dot[1]=_att_control(1);
-    _csi_dot.csi_dot[2]=_att_control(2);
+    _csi_dot.csi_dot[6]=_att_control(0);
+    _csi_dot.csi_dot[7]=_att_control(1);
+    _csi_dot.csi_dot[8]=_att_control(2);
 
-    if (_csi_dot_pub != nullptr) {
-        orb_publish(ORB_ID(csi_dot), _csi_dot_pub, &_csi_dot);
-
-    } else{
-        _csi_dot_pub = orb_advertise(ORB_ID(csi_dot), &_csi_dot);
-    }
+    //_csi_dot.csi_dot[9] =  rates(2);
+    //_csi_dot.csi_dot[10]= _rates_sp(2);
 
 
-	/* update integral only if not saturated on low limit and if motor commands are not saturated */
+    math::Vector<3> est_torque_dist_new; est_torque_dist_new.zero();
+
+    /* update integral only if not saturated on low limit and if motor commands are not saturated */
 	if (_thrust_sp > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
 
 //        math::Vector<3> _att_control_acc_i =  _params.rate_i.emult(rates_err) * dt;
         math::Vector<3> _att_control_acc_i =  Kiv.emult(rates_err) * dt;
+
+
 
 		for (int i = 0; i < 3; i++) {
 			if (fabsf(_att_control(i)) < _thrust_sp) {
@@ -893,13 +915,61 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
 	// RR* ....................
 
-				if (PX4_ISFINITE(rate_i) && rate_i > -RATES_I_LIMIT && rate_i < RATES_I_LIMIT &&
+                    //am_dist_state = (am_dist_state_u*dt + am_dist_state*am_tdo_tf)/(am_tdo_tf+dt);
+                    float am_dist_state_test = (am_dist_state_u(i)*dt + am_dist_state(i)*am_tdo_tf)/(am_tdo_tf+dt);
+
+                    /** Updated est_torque_dist se forza non saturata */
+                    //math::Vector<3> est_torque_dist_new = am_dist_state - Jm_qdot/am_tdo_tf;
+                    //float est_torque_dist_new = am_dist_state_test - Jm_qdot(i)/am_tdo_tf;
+
+                    est_torque_dist_new(i) = am_dist_state_test - Jm_qdot(i)/am_tdo_tf;
+                    float torque_test  = _att_control(i) + ControlToActControl_tau(i)*(est_torque_dist_new(i) - est_torque_dist(i));
+
+				if (PX4_ISFINITE(torque_test) && torque_test > -RATES_I_LIMIT && torque_test < RATES_I_LIMIT &&
+				    _att_control(i) > -RATES_I_LIMIT && _att_control(i) < RATES_I_LIMIT) {
+				    est_torque_dist(i) = est_torque_dist_new(i);
+				    am_dist_state(i) = am_dist_state_test;
+				}
+
+                if (PX4_ISFINITE(rate_i) && rate_i > -RATES_I_LIMIT && rate_i < RATES_I_LIMIT &&
 				    _att_control(i) > -RATES_I_LIMIT && _att_control(i) < RATES_I_LIMIT) {
 					_rates_int(i) = rate_i;
 				}
+
 			}
+			else{
+                est_torque_dist_new(i) = _thrust_sp*10.0f;
+            }
 		}
 	}
+	else{
+            if (_motor_limits.lower_limit){
+                est_torque_dist_new(0) = 5.0f;
+                est_torque_dist_new(1) = _thrust_sp;
+            }
+            if (_motor_limits.upper_limit){
+                est_torque_dist_new(0) = 10.0f;
+                est_torque_dist_new(1) = _thrust_sp;
+            }
+	}
+
+	//_csi_dot.csi_dot[3]=ControlToActControl_tau(0)*est_torque_dist(0);
+    //_csi_dot.csi_dot[4]=ControlToActControl_tau(1)*est_torque_dist(1);
+    //_csi_dot.csi_dot[5]=ControlToActControl_tau(2)*est_torque_dist(2);
+
+    //_csi_dot.csi_dot[9] = ControlToActControl_tau(0)*est_torque_dist_new(0);
+    //_csi_dot.csi_dot[10]= ControlToActControl_tau(1)*est_torque_dist_new(1);
+
+    _csi_dot.csi_dot[9] = ControlToActControl_tau(0)*est_torque_dist(0);
+    _csi_dot.csi_dot[10]= ControlToActControl_tau(1)*est_torque_dist(1);
+
+    if (_csi_dot_pub != nullptr) {
+        orb_publish(ORB_ID(csi_dot), _csi_dot_pub, &_csi_dot);
+
+    } else{
+        _csi_dot_pub = orb_advertise(ORB_ID(csi_dot), &_csi_dot);
+    }
+
 }
 
 void
@@ -1031,6 +1101,9 @@ MulticopterAttitudeControl::task_main()
 
     euler_angles_sp_prev.zero(); // RR*
     _euler_angles_sp_dot_prev.zero();
+
+    am_dist_state.zero();
+    est_torque_dist.zero();
 
 	while (!_task_should_exit) {
 

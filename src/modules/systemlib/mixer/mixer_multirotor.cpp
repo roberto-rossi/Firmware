@@ -59,6 +59,11 @@
 
 #define debug(fmt, args...)	do { } while(0)
 //#define debug(fmt, args...)	do { printf("[mixer] " fmt "\n", ##args); } while(0)
+/** RR*/
+//#define debug(fmt, args...)	do { } while(0)
+//#define debug(fmt, args...)	do { printf("[mixer] " fmt "\n", ##args); } while(0)
+/** RR*/
+
 //#include <debug.h>
 //#define debug(fmt, args...)	lowsyslog(fmt "\n", ##args)
 
@@ -224,7 +229,7 @@ MultirotorMixer::mix(float *outputs, unsigned space, uint16_t *status_reg)
 	float		pitch   = constrain(get_control(0, 1) * _pitch_scale, -1.0f, 1.0f);
 	float		yaw     = constrain(get_control(0, 2) * _yaw_scale, -1.0f, 1.0f);
 	float		thrust  = constrain(get_control(0, 3), 0.0f, 1.0f);
-	float		min_out = 0.0f;
+	float		min_out = 1.0f;
 	float		max_out = 0.0f;
 
 	// clean register for saturation status flags
@@ -237,12 +242,19 @@ MultirotorMixer::mix(float *outputs, unsigned space, uint16_t *status_reg)
 	float thrust_decrease_factor = 0.6f;
 
 	/* perform initial mix pass yielding unbounded outputs, ignore yaw */
+
+	//debug("Nuovi output: \n");
+
 	for (unsigned i = 0; i < _rotor_count; i++) {
 		float out = roll * _rotors[i].roll_scale +
-			    pitch * _rotors[i].pitch_scale +
-			    thrust;
+                    pitch * _rotors[i].pitch_scale +
+                    thrust;
 
 		out *= _rotors[i].out_scale;
+
+        //debug("out n_%-2.4g :  %-2.4g \n", (double)i, (double)out);
+
+
 
 		/* calculate min and max output values */
 		if (out < min_out) {
@@ -255,6 +267,8 @@ MultirotorMixer::mix(float *outputs, unsigned space, uint16_t *status_reg)
 
 		outputs[i] = out;
 	}
+
+
 
 	float boost = 0.0f;				// value added to demanded thrust (can also be negative)
 	float roll_pitch_scale = 1.0f;	// scale for demanded roll and pitch
@@ -298,13 +312,15 @@ MultirotorMixer::mix(float *outputs, unsigned space, uint16_t *status_reg)
 	}
 
 	// notify if saturation has occurred
+
+	//min_out = 0.2f;
 	if (min_out < 0.0f) {
 		if (status_reg != NULL) {
 			(*status_reg) |= PX4IO_P_STATUS_MIXER_LOWER_LIMIT;
 		}
 	}
 
-	if (max_out > 0.0f) {
+	if (max_out > 1.0f) {
 		if (status_reg != NULL) {
 			(*status_reg) |= PX4IO_P_STATUS_MIXER_UPPER_LIMIT;
 		}
