@@ -966,13 +966,16 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
             am_omega_xy_dot_ref_int_add.zero();
             am_omega_xy_dot_ref.zero();
             am_att_control_acc_i.zero();
+
+            am_u_tbeta.zero();
+            am_u_tbeta_int_add.zero();
+
+            beta.zero();
+            beta_p.zero();
             err_omega_alpha_int.zero();
             alpha_dot_int.zero();
             alpha_dot_int_add.zero();
-            am_u_tbeta.zero();
-            am_u_tbeta_int_add.zero();
-            beta.zero();
-            beta_p.zero();
+
             reset_int_flag = false;
             }
 

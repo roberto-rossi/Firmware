@@ -252,7 +252,7 @@ private:
 //    const float Kp_alpha_pos = 2.0f;
 //    const float Kp_alpha = 15.0f;
 //    const float Ki_alpha =  40.0f; //10.0f;
-    const float W_w2beta = 0.1f;
+    const float W_w2beta = 0.3f;
     /** MC* ...........*/
 
 	orb_advert_t	_v_rates_sp_pub;		/**< rate setpoint publication */
@@ -308,6 +308,9 @@ private:
     bool am_saturation_utbZ_thrust;
 	bool am_saturation_utbZ_tau_quad;
 	bool am_saturation_utbZ_tau_robot;
+
+
+    bool am_saturation_omega = false;
 
 	bool reset_int_flag = true;
 
@@ -947,13 +950,13 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
     Bww.set_row(2,Bww_r3);
 
 	math::Vector<3> Kpv;
-	Kpv(0) = 20.0f;
-	Kpv(1) = 25.0f;
-	Kpv(2) = 20.0f;
+	Kpv(0) = 18.0f;//20.0f;
+	Kpv(1) = 24.0f;//25.0f;
+	Kpv(2) = 15.0f;//20.0f;
 	math::Vector<3> Kiv;
-	Kiv(0) = 40.0f; // 46.87f;//62.5f;
-	Kiv(1) = 70.0f; // 46.87f;//62.5f;
-	Kiv(2) = 30.0f;
+	Kiv(0) = 130.0f;//40.0f; // 46.87f;//62.5f;
+	Kiv(1) = 200.0f;//70.0f; // 46.87f;//62.5f; // CAMBIATO DA Kalman_ext
+	Kiv(2) = 30.0f;//30.0f;
 	math::Vector<3> Kdv;
 	Kdv(0) = 0.0f;//02f;
 	Kdv(1) = 0.0f;//02f;
@@ -983,9 +986,18 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
             am_omega_xy_dot_ref_int_add.zero();
             am_omega_xy_dot_ref.zero();
             am_att_control_acc_i.zero();
+
+
+            am_u_tbeta.zero();
+            am_u_tbeta_int_add.zero();
+
+            beta.zero();
+            beta_p.zero();
+
             err_omega_alpha_int.zero();
             alpha_dot_int.zero();
             alpha_dot_int_add.zero();
+
             reset_int_flag = false;
             }
 
@@ -1109,11 +1121,11 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
             _thrust_sp = am_thrust;
         /** Aggiorna Integrali*/
-            //if (fabsf(am_thrust) > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) { !!!!!!!!!
-            //    if (!am_saturation_omega_tau_quad && !am_saturation_omega_tau_robot && !am_saturation_omega_thrust){
+            if (fabsf(am_thrust) > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) { //!!!!!!!!!
+                if (!am_saturation_omega){
                     am_att_control_acc_i += am_omega_xy_dot_ref_int_add;
-            //    }
-            //}
+                }
+            }
 
     }else{
         math::Vector<3> _att_control_pd; // =
@@ -1317,12 +1329,13 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
 
 
     am_phi_xy_r(0)= am_rpy_sp(0); //_csi.csi[3];
-    am_phi_xy_r(1)= 0.0f; //am_rpy_sp(1); //_csi.csi[4];
+    am_phi_xy_r(1)= am_rpy_sp(1); //_csi.csi[4];
 
     omega_xy_r(0)= _rates_sp(0);//_ctrl_state.roll_rate;
-    omega_xy_r(1)= 0.0f; //_rates_sp(1);//_ctrl_state.pitch_rate;
+    omega_xy_r(1)= _rates_sp(1);//_ctrl_state.pitch_rate;
 
     alpha_p = alpha_p0 - beta_p;
+
     alpha_fb = (-am_T_betaw*am_phi_xy_r - alpha_p)*Kpp_alpha;
     err_alpha = beta - alpha_0 - am_T_betaw*omega_xy_r + alpha_fb;
     alpha_dot_int_add = err_alpha*Kiv_alpha*dt;
@@ -1332,24 +1345,6 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
     for (int i = 0; i < 6; ++i) {
         am_u_tbeta(i+2) += alpha_dot(i)*0.0f; // ATTENZIONE! LEVATO ALPHA!
     }
-
-//    //err_omega_csi = phi_r - am_T_betaw_sq_inv*am_T_betaw_t*csi_alpha; //usa riferimento, non valore attuale
-//    //omega_alpha_fb = Kp_w_alpha*err_omega_csi;
-//    err_omega_alpha_pos = (-am_phi_xy_r - am_T_betaw_sq_inv*am_T_betaw_t*alpha_pos)*Kp_alpha_pos;
-//
-//    err_omega_alpha = err_omega_alpha_pos - omega_xy_r - am_T_betaw_sq_inv*am_T_betaw_t*alpha;
-//
-//    err_omega_alpha_int_add = err_omega_alpha*Ki_alpha*dt;
-//
-//    am_u_tbeta_aux = am_T_betaw*(err_omega_alpha*Kp_alpha+err_omega_alpha_int);
-//
-//    //if (!_am_flag.am_saturation_utb_tau_quad && !_am_flag.am_saturation_utb_tau_robot && !_am_flag.am_saturation_utb_thrust){
-//        err_omega_alpha_int += err_omega_alpha_int_add;
-//    //}
-//
-//    for (int i = 0; i < 6; ++i) {
-//        am_u_tbeta(i+2) += am_u_tbeta_aux(i);
-//    }
 
     am_tau_beta_in = am_Bb_tb_i_pinv*(am_u_tbeta + am_Bt_tb_i*am_g_t);
 
@@ -1366,7 +1361,7 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
     /** Calcola le tb_dot_ref con Bb_tb_i, Bt_tb_i, g, tau_beta_in. */
     am_beta_dot_ref = am_Bb_tb_i.transposed()*am_effec_tau;
 
-    am_omega_xy_dot_ref(1) = 0; // !!!
+    //am_omega_xy_dot_ref(1) = 0; // !!!
 
     /** Tau_beta = tau_b_inertia + (C_betav + g_beta) + (B_betaw * omega_dot_ref) */
     am_tau_beta = am_g_beta + am_tau_beta_in + am_B_betaw*am_omega_xy_dot_ref;
@@ -1410,7 +1405,7 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
 //    printf("\n");
 
     /** Tau_omega_xy = (B_ww * omega_dot_ref_xy) + (B_wbeta * beta_dot_ref) + (C_wv + g_w) */
-    am_tau_omega_xy = am_B_ww*am_omega_xy_dot_ref + (am_B_wbeta*am_beta_dot_ref) +  am_g_w;
+    am_tau_omega_xy = am_B_ww*am_omega_xy_dot_ref + (am_B_wbeta*am_beta_dot_ref)*W_w2beta +  am_g_w;
 
     am_T_betaw_t = am_T_betaw.transposed();
 
@@ -1418,7 +1413,7 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
     const float am_thr_max = 0.9f; // CONTROLLA!!!!!
     const float am_thr_min = 0.1f; // CONTROLLA!!!!!
     const float am_tau_quad_max = 0.3f;
-    const float am_tau_robot_max = 1.0f; //!!!
+    const float am_tau_robot_max = 1.3f; //!!!
 
     /** Restituisce Tau_quad*/
 
@@ -1491,13 +1486,14 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
 
             am_tau_utb_Z_aux = am_BZ_tb_i_pinv*am_u_tbeta_Z_int_add;
 
-            am_tau_quad_int_add_aux = (am_B_wbeta*am_Bbb_tb_i + am_T_betaw_t)*am_tau_utb_Z_aux;
+            am_tau_quad_int_add_aux =   (am_B_wbeta*am_Bbb_tb_i*W_w2beta + am_T_betaw_t)*am_tau_utb_Z_aux;
             am_tau_quad_int_add(0)  =   am_tau_quad(0) + ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
             am_tau_quad_int_add(1)  =   am_tau_quad(1) + ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
             am_tau_beta_int_add     =   am_tau_beta + am_tau_utb_Z_aux;
 
             /** SATURA?*/
-            // TODO
+                bool am_saturation_thrust = false;
+
                 am_saturation_utbZ_thrust = false;
                 if (ControlToActControl_T*fabsf(am_tau_beta_int_add(0))>am_thr_max){
                         am_saturation_utbZ_thrust = true;
@@ -1523,27 +1519,32 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
                     }
                 }
 
+                /** Risultato:*/
+                if (am_saturation_utbZ_thrust || am_saturation_utbZ_tau_robot || am_saturation_utbZ_thrust){
+                    am_saturation_thrust = true;
+                }
+
         /** Effect of omega_dot_ref */
 
                 am_tau_quad_int_add_aux = (am_B_ww + am_T_betaw_t*am_B_betaw)*am_omega_xy_dot_ref_int_add;
-                if (!am_saturation_utbZ_thrust && !am_saturation_utbZ_tau_robot && !am_saturation_utbZ_thrust){
+                math::Vector<6> am_tau_utb_aux = am_B_betaw*am_omega_xy_dot_ref_int_add*W_w2beta;
+                if (!am_saturation_thrust){
                     am_tau_quad_int_add(0)  +=   ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
                     am_tau_quad_int_add(1)  +=   ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
-                    am_tau_beta_int_add     +=   am_B_betaw*am_omega_xy_dot_ref_int_add;
+                    am_tau_beta_int_add     +=   am_tau_utb_aux;
                 }else{
                     am_tau_quad_int_add(0)  =   am_tau_quad(0) + ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
                     am_tau_quad_int_add(1)  =   am_tau_quad(1) + ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
-                    am_tau_beta_int_add     =   am_tau_beta + am_B_betaw*am_omega_xy_dot_ref_int_add;
+                    am_tau_beta_int_add     =   am_tau_beta + am_tau_utb_aux;
                 }
 
 
             /** SATURA?*/
-                //TODO
                 am_saturation_omega_thrust = false;
-
                 if (ControlToActControl_T*fabsf(am_tau_beta_int_add(0))>am_thr_max){
                         am_saturation_omega_thrust = true;
                 }
+
                 am_saturation_omega_tau_quad = false;
                 if (fabsf(am_thrust) > MIN_TAKEOFF_THRUST && !_motor_limits.lower_limit && !_motor_limits.upper_limit) {
                     for (int j = 0; j < 2; j++) {
@@ -1564,23 +1565,32 @@ MulticopterAttitudeControl::compute_final_torques(float dt)
                     }
                 }
 
+            /** Risultato:*/
+                if (am_saturation_omega_thrust || am_saturation_omega_tau_quad || am_saturation_omega_tau_robot){
+                    am_saturation_omega = true;
+                }
+                else{
+                    am_saturation_omega = false;
+                }
+
         /** Effect of tbeta_dot_ref */
-                 if (am_saturation_omega_tau_quad || am_saturation_omega_tau_robot || am_saturation_omega_thrust){
+                //bool am_saturation_beta = false;
+
+                 if (am_saturation_omega){
                      // Leva l'incremento di coppia dovuto a omega
                     am_tau_quad_int_add(0)  -=   ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
                     am_tau_quad_int_add(1)  -=   ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
-                    am_tau_beta_int_add     -=   am_B_betaw*am_omega_xy_dot_ref_int_add;
+                    am_tau_beta_int_add     -=   am_tau_utb_aux;
                 }
 
-                math::Vector<6> am_tau_utb_aux = am_Bb_tb_i_pinv*am_u_tbeta_int_add_noZ;
-                    am_tau_quad_int_add_aux = (am_B_wbeta*am_Bbb_tb_i + am_T_betaw_t)*am_tau_utb_aux;
+                am_tau_utb_aux          =   am_Bb_tb_i_pinv*am_u_tbeta_int_add_noZ;
+                am_tau_quad_int_add_aux =   (am_B_wbeta*am_Bbb_tb_i*W_w2beta + am_T_betaw_t)*am_tau_utb_aux;
 
                 am_tau_quad_int_add(0)  +=   ControlToActControl_tau(0)*am_tau_quad_int_add_aux(0);
                 am_tau_quad_int_add(1)  +=   ControlToActControl_tau(1)*am_tau_quad_int_add_aux(1);
                 am_tau_beta_int_add     +=   am_tau_utb_aux;
 
             /** SATURA?*/
-            // TODO
                 am_saturation_utb_thrust = false;
                 if (ControlToActControl_T*fabsf(am_tau_beta_int_add(0))>am_thr_max){
                         am_saturation_utb_thrust = true;
