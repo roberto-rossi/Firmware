@@ -876,7 +876,7 @@ MulticopterAttitudeControl::control_attitude_rates(float dt)
 
 	_att_control = _att_control_pd  + _rates_int + ControlToActControl_tau.emult(est_torque_dist);
 
-    float am_tdo_tf = 2.0f;
+    float am_tdo_tf = 0.3f;
 
     math::Vector<3> Jm_qdot = Bww*rates;
     math::Vector<3> tau_actual; tau_actual = _att_control.edivide(ControlToActControl_tau);

@@ -1456,9 +1456,9 @@ MulticopterPositionControl::task_main()
 
 				//GM*
 				math::Vector<3> Kpp;
-				Kpp(0) = 0.5f;//0.3
-				Kpp(1) = 0.5f;
-				Kpp(2) = 0.2f; // _params.pos_p(2);
+				Kpp(0) = 0.2f;//0.3
+				Kpp(1) = 0.2f;
+				Kpp(2) = 0.3f; // _params.pos_p(2);
 
                 math::Vector<3> Kff_p;
                 Kff_p(0) = 0.0f;
@@ -1476,8 +1476,8 @@ MulticopterPositionControl::task_main()
 
                 math::Vector<3> vel_sp_ff = Kff_p.emult(pos_sp_dot);
 
-                float tau_der_p = 0.05;
-
+                /** Filtra posizione */
+                float tau_der_p = 0.2;
                 math::Vector<3> am_pos = (_pos*dt + am_pos_prev*tau_der_p)/(tau_der_p+dt);
 
 
@@ -1677,7 +1677,7 @@ MulticopterPositionControl::task_main()
 					}
 
 					/* velocity error */
-					float tau_der_v = 0.02;
+					float tau_der_v = 0.1;
 					math::Vector<3> AM_vel = (AM_vel_prev*tau_der_v + am_pos - am_pos_prev)/(tau_der_v+dt);//RR*
                     AM_vel_prev  = AM_vel;
                     _pos_prev = _pos;
@@ -1783,13 +1783,13 @@ MulticopterPositionControl::task_main()
 
 				//GM*	NB la z non è toccata
 				math::Vector<3> Kpv;
-				Kpv(0) = 1.5f; //1.5f; //migliore per ora
-				Kpv(1) = 1.5f; //1.5f;
-				Kpv(2) = 0.9f; // 2.5f;//_params.vel_p(2);
+				Kpv(0) = 1.6f; //1.5f; //migliore per ora
+				Kpv(1) = 1.6f; //1.5f;
+				Kpv(2) = 1.5f; // 2.5f;//_params.vel_p(2);
 				math::Vector<3> Kiv;
 				Kiv(0) = 0.3f;//1.2f; //0.8f
 				Kiv(1) = 0.3f;//1.2f; //0.8f
-				Kiv(2) = 0.3f;//0.46f // 0.625f _params.vel_i(2);
+				Kiv(2) = 0.4f;//0.46f // 0.625f _params.vel_i(2);
 				math::Vector<3> Kdv;
 				Kdv(0) = 0.0f;
 				Kdv(1) = 0.0f;
@@ -1811,7 +1811,7 @@ MulticopterPositionControl::task_main()
                 thrust_sp += gravity_vect;//aggiunta gravita
 
                 /** Torque disturbance Observer */
-                float am_tdo_tf = 10.0f;
+                float am_tdo_tf = 5.0f;
                 math::Vector<3> Jm_qdot = AM_vel*Mass_quadrotor;
 
                 math::Matrix<3, 3> am_R_att;
