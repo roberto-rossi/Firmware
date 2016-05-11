@@ -188,8 +188,8 @@ private:
     math::Vector<8> am_err_v;
 
     float Kpp =  0.2f; //1.0f;
-    float Kpv =  2.0f; //10.0f;
-    float Kiv =  0.65f; //20.0f;
+    float Kpv =  1.5f; //10.0f;
+    float Kiv =  0.3f; //20.0f;
 
     //float csi_dot_lp[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     //float csi_dot_lp_old[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -215,6 +215,7 @@ private:
 
     math::Vector<3> AM_vel_prev; // RR*
     math::Vector<3> _pos_prev;
+    math::Vector<3> am_pos_prev;
 
     hrt_abstime Ts_prev;
 
@@ -344,6 +345,8 @@ private:
     math::Vector<3> am_Fxyz_int;
     math::Vector<3> est_torque_dist;
     math::Vector<3> am_Fxyz_int_add;
+
+    math::Vector<3> am_pos_sp_act;
     /** Matrices: */
 //    matrix::Vector<float,10> am_g_eta;
 //    matrix::Matrix<float,10,10> am_B_eta;
@@ -353,6 +356,8 @@ private:
 
     float ControlToActControl_T;// b = zeros(4,1);
     float Mass_quadrotor; // no battery
+    int first_pos_prev;
+    int counter_post_reset;
     /** RR* ..................... */
 
 	/**
@@ -429,7 +434,7 @@ private:
 	static void	task_main_trampoline(int argc, char *argv[]);
 
     /** MC* ...............*/
-    void         compute_utbeta();
+    void         compute_utbeta(float dt);
     /** MC* ...............*/
 
 	/** RR* compute tau arm and F quad
@@ -600,6 +605,7 @@ MulticopterPositionControl::MulticopterPositionControl() :
     /** RR* ....................*/
     ControlToActControl_T = 0.0192f;// b = zeros(4,1);
     Mass_quadrotor = 2.4259f; // no battery
+    first_pos_prev = 1;
     /** RR* ....................*/
 }
 
@@ -1313,6 +1319,7 @@ MulticopterPositionControl::task_main()
 	est_torque_dist.zero();
     _pos_prev.zero();
     AM_vel_prev.zero();
+    am_pos_prev.zero();
     // RR* //
 
 	/* wakeup source */
@@ -1384,21 +1391,18 @@ MulticopterPositionControl::task_main()
 				_pos(1) = _local_pos.y;
 				_pos(2) = _local_pos.z;
 
-                float tau_der_v = 0.15;
-                math::Vector<3> AM_vel = (AM_vel_prev*tau_der_v + _pos - _pos_prev)/(tau_der_v+dt);//RR*
-                AM_vel_prev  = AM_vel;
                 _pos_prev = _pos;
 
-                _vel = AM_vel; //RR*
+                //_vel = AM_vel; //RR*
 			}
 
 			if (PX4_ISFINITE(_local_pos.vx) &&
 				PX4_ISFINITE(_local_pos.vy) &&
 				PX4_ISFINITE(_local_pos.vz)) {
 
-				//_vel(0) = _local_pos.vx; //RR*
-				//_vel(1) = _local_pos.vy; //RR*
-				//_vel(2) = _local_pos.vz; //RR*
+				_vel(0) = _local_pos.vx; //RR*
+				_vel(1) = _local_pos.vy; //RR*
+				_vel(2) = _local_pos.vz; //RR*
 
 			}
 
@@ -1427,27 +1431,42 @@ MulticopterPositionControl::task_main()
             orb_copy(ORB_ID(csi_dot_r), _csi_r_dot_sub, &_csi_r_dot);
         }
 
+        /** Filtra posizione */
+        math::Vector<3> am_pos_raw;
+        am_pos_raw = _pos;
+        float tau_der_p = 0.2;
+
+        if (first_pos_prev == 1){
+            am_pos_prev = am_pos_raw;
+            first_pos_prev = 0;
+        }
+
+        math::Vector<3> am_pos = (am_pos_raw*dt + am_pos_prev*tau_der_p)/(tau_der_p+dt);
+        am_pos_prev = am_pos;
+
+        /** Calcola velocità*/
+        float tau_der_v = 0.1;
+        math::Vector<3> AM_vel = (AM_vel_prev*tau_der_v + am_pos - am_pos_prev)/(tau_der_v+dt);//RR*
+        AM_vel_prev  = AM_vel;
+
+
+        /** Assegna valori*/
         //Copia valori di attitude nella variabile csi
-        _csi.csi[0]= _local_pos.x;
-        _csi.csi[1]= _local_pos.y;
-        _csi.csi[2]= _local_pos.z;
+        _csi.csi[0]= am_pos(0);//_local_pos.x;
+        _csi.csi[1]= am_pos(1);//_local_pos.y;
+        _csi.csi[2]= am_pos(2);//_local_pos.z;
         _csi.csi[3]= _vehicle_attitude.roll;
         _csi.csi[4]= _vehicle_attitude.pitch;
         _csi.csi[5]= _vehicle_attitude.yaw; // !!!
-
         _csi.csi[6]= _dynamixel_state.q[0];
         _csi.csi[7]= _dynamixel_state.q[1];
         _csi.csi[8]= _dynamixel_state.q[2];
         _csi.csi[9]= _dynamixel_state.q[3];
         _csi.csi[10]=_dynamixel_state.q[4];
-        //_csi_dot.csi_dot[0]= 0.0f; //_local_pos.vx;
-        //_csi_dot.csi_dot[1]= 0.0f; //_local_pos.vy;
-        //_csi_dot.csi_dot[2]= 0.0f; //_local_pos.vz;
 
-
-        _csi_dot.csi_dot[0]=_vel(0); //0.0f; //_local_pos.vx;
-        _csi_dot.csi_dot[1]=_vel(1);//0.0f; //_local_pos.vy;
-        _csi_dot.csi_dot[2]=_vel(2);//0.0f; //_local_pos.vz;
+        _csi_dot.csi_dot[0]= AM_vel(0);//_vel(0); //0.0f; //_local_pos.vx;
+        _csi_dot.csi_dot[1]= AM_vel(1);//_vel(1);//0.0f; //_local_pos.vy;
+        _csi_dot.csi_dot[2]= AM_vel(2);//_vel(2);//0.0f; //_local_pos.vz;
         _csi_dot.csi_dot[3]=_vehicle_attitude.rollspeed;
         _csi_dot.csi_dot[4]=_vehicle_attitude.pitchspeed;
         _csi_dot.csi_dot[5]=_vehicle_attitude.yawspeed;
@@ -1456,6 +1475,18 @@ MulticopterPositionControl::task_main()
         _csi_dot.csi_dot[8]=_dynamixel_state.q_dot[2];
         _csi_dot.csi_dot[9]=_dynamixel_state.q_dot[3];
         _csi_dot.csi_dot[10]=_dynamixel_state.q_dot[4];
+
+
+        for (int i = 0; i < 10; ++i) {
+            am_csi(i) = _csi.csi[i];
+            am_csi_dot(i)=_csi_dot.csi_dot[i];
+        }
+
+        am_csi(3) = 0.0f; //!!!
+        am_csi(4) = 0.0f; //!!!
+        am_csi_dot(3) = 0.0f; //!!!
+        am_csi_dot(4) = 0.0f; //!!!
+
 
 //        printf("q_dot (pos control): \n");
 //        for (size_t j = 0; j < 5; j++) {
@@ -1772,9 +1803,21 @@ MulticopterPositionControl::task_main()
 							_pos_prev(1)    = _pos(1);//RR*
 				            _pos_prev(2)    = _pos(2);//RR*
 				            reset_int_flag = false;
+
+				            am_pos_sp_act = _pos;
+				            //pos_sp_dot_prev.zero(); TODO
+                            //pos_sp_prev     = am_pos_sp_act; TODO
+                            am_pos_prev = _pos;
+
+
+                            counter_post_reset = 0;
 				            }
 
-                        compute_utbeta();
+                        hrt_abstime am_t = hrt_absolute_time();
+                        float Ts = Ts_prev != 0 ? (am_t - Ts_prev) * 0.000001f : 0.02f;
+                        Ts_prev = am_t;
+
+                        compute_utbeta(Ts);
 
                         bool updated;
                         orb_check(_am_flag_sub, &updated);
@@ -1782,7 +1825,7 @@ MulticopterPositionControl::task_main()
                             orb_copy(ORB_ID(am_flag), _am_flag_sub, &_am_flag);
                         }
 
-                        compute_tautbeta(dt);
+                        compute_tautbeta(Ts);
 
                         math::Matrix<3, 3> am_R_att;
                         am_R_att.set(_vehicle_attitude.R);
@@ -2295,8 +2338,8 @@ void MulticopterPositionControl::read_am_messages()
     int ii = 0;
     int jj = 0;
     for (int i = 0; i < 10; ++i) {
-        am_csi(i) = _csi.csi[i];
-        am_csi_dot(i)=_csi_dot.csi_dot[i];
+        //am_csi(i) = _csi.csi[i];
+        //am_csi_dot(i)=_csi_dot.csi_dot[i];
         am_csi_r(i) = _csi_r.csi_r[i];
         am_csi_r_dot(i)=_csi_r_dot.csi_r_dot[i];
         if(i<5){
@@ -2354,7 +2397,7 @@ void MulticopterPositionControl::read_am_messages()
 
 }
 /** MC* ....................*/
-void MulticopterPositionControl::compute_utbeta()
+void MulticopterPositionControl::compute_utbeta(float dt)
 {
     //Lettura uORB
     bool updated;
@@ -2362,10 +2405,6 @@ void MulticopterPositionControl::compute_utbeta()
     if (updated) {
         orb_copy(ORB_ID(T_bw_matrix), _T_bw_sub, &_T_bw);
     }
-
-    hrt_abstime t = hrt_absolute_time();
-    float Ts = Ts_prev != 0 ? (t - Ts_prev) * 0.000001f : 0.02f;
-    Ts_prev = t;
 
 //    printf("csi_r: \n");
 //    for (size_t j = 0; j < 11; j++) {
@@ -2488,7 +2527,56 @@ void MulticopterPositionControl::compute_utbeta()
     //am_csi_r_dot(3) = 0.0f;
     //am_csi_r_dot(4) = 0.0f;
 
+    /** Rendi smooth il riferimento dei primi 5 secondi */
+    float am_tau_transition = 2.0;
+    math::Vector<3> am_pos_sp_raw;
+//    am_pos_sp_raw(0) = am_csi_r(0);
+//    am_pos_sp_raw(1) = am_csi_r(1);
+//    am_pos_sp_raw(2) = am_csi_r(2);
+
+    am_pos_sp_raw(0) = _pos_sp(0);
+    am_pos_sp_raw(1) = _pos_sp(1);
+    am_pos_sp_raw(2) = _pos_sp(2);
+
+    if(counter_post_reset<500){ // più o meno 5 secondi
+        am_pos_sp_act = (am_pos_sp_act*am_tau_transition + am_pos_sp_raw*dt)/(am_tau_transition + dt);
+        counter_post_reset++;
+    }
+    else{
+        am_pos_sp_act = am_pos_sp_raw;
+    }
+    am_csi_r(0) = am_pos_sp_raw(0);
+    am_csi_r(1) = am_pos_sp_raw(1);
+    am_csi_r(2) = am_pos_sp_raw(2);
+
+//    /** Filtra posizione */
+//    math::Vector<3> am_pos_raw;
+//    am_pos_raw(0) = am_csi(0);
+//    am_pos_raw(1) = am_csi(1);
+//    am_pos_raw(2) = am_csi(2);
+//    float tau_der_p = 0.2;
+//    math::Vector<3> am_pos = (am_pos_raw*dt + am_pos_prev*tau_der_p)/(tau_der_p+dt);
+//    am_pos_prev = am_pos;
+//    am_csi(0) = am_pos(0);
+//    am_csi(1) = am_pos(1);
+//    am_csi(2) = am_pos(2);
+//
+//    /** Calcola velocità*/
+//    float tau_der_v = 0.1;
+//    math::Vector<3> AM_vel = (AM_vel_prev*tau_der_v + am_pos - am_pos_prev)/(tau_der_v+dt);//RR*
+//    AM_vel_prev  = AM_vel;
+//
+//    am_csi_dot(0) = AM_vel(0);
+//    am_csi_dot(1) = AM_vel(1);
+//    am_csi_dot(2) = AM_vel(2);
+
+    am_csi(6) = am_csi_r(6); //!!!
+    am_csi(7) = am_csi_r(7); //!!!
+    am_csi(8) = am_csi_r(8); //!!!
+    am_csi(9) = am_csi_r(9); //!!!
+
     am_eta_r_fb = (T_reduced*(am_csi_r - am_csi))*Kpp;
+
 
    //Blocco movimento giunti 1 e 2
 //   am_eta_r_fb(5) = (am_csi_r(7) - am_csi(7))*Kpp;
@@ -2521,7 +2609,7 @@ void MulticopterPositionControl::compute_utbeta()
     //Calcolo coppia proporzionale
     am_u_tbeta = am_err_v*Kpv + am_u_tbeta_int;  // am_u_t
     //Calcolo coppia integrale
-    am_u_tbeta_int_add = am_err_v*Kiv*Ts;
+    am_u_tbeta_int_add = am_err_v*Kiv*dt;
 
     // FILTRO SU RIFERIMENTO
     /** COMMENTATO SCAMBIO MATRICI - start**/
@@ -2530,9 +2618,9 @@ void MulticopterPositionControl::compute_utbeta()
 //        beta_p_r(i+1) = _csi_r.csi_r[i+5];
 //    }
     /** COMMENTATO SCAMBIO MATRICI - end**/
-    beta_p = (-beta_p_2old+beta_p_old*(Kpv*Ts+2)+beta_p_r*(Kpv*Kpp*Ts*Ts+Kpv*Ts)-beta_p_r_old*Kpv*Ts)/(1+Kpv*Ts+Kpp*Kpv*Ts*Ts);
-    beta = (beta_p - beta_p_old)/Ts;
-    beta_dot = (beta_p - beta_p_old*2 + beta_p_2old)/(Ts*Ts);
+    beta_p = (-beta_p_2old+beta_p_old*(Kpv*dt+2)+beta_p_r*(Kpv*Kpp*dt*dt+Kpv*dt)-beta_p_r_old*Kpv*dt)/(1+Kpv*dt+Kpp*Kpv*dt*dt);
+    beta = (beta_p - beta_p_old)/dt;
+    beta_dot = (beta_p - beta_p_old*2 + beta_p_2old)/(dt*dt);
 
     beta_p_2old = beta_p_old;
     beta_p_old  = beta_p;
@@ -2686,11 +2774,14 @@ void MulticopterPositionControl::compute_tautbeta(float dt)
     am_Fxyz = am_B_tz_tb*am_u_tbeta + am_g_tz + est_torque_dist;
 
 /** Torque disturbance Observer */
-    float am_tdo_tf = 0.06f;
+    float am_tdo_tf = 5.0f;
     math::Vector<3> Jm_qdot = am_B_tz_tb*am_eta;
     math::Vector<3> am_Fxyz_int_u = am_Fxyz - am_g_tz + Jm_qdot/am_tdo_tf;
-    am_Fxyz_int = (am_Fxyz_int_u*dt + am_Fxyz_int*am_tdo_tf)/(am_tdo_tf+dt);
-    est_torque_dist = am_Fxyz_int - Jm_qdot/am_tdo_tf;
+
+    // SATURAZIONE!!!!
+    math::Vector<3> am_Fxyz_int_test = (am_Fxyz_int_u*dt + am_Fxyz_int*am_tdo_tf)/(am_tdo_tf+dt);
+    math::Vector<3> est_torque_dist_test = am_Fxyz_int_test - Jm_qdot/am_tdo_tf;
+
 
 //    printf("am_Fxyz: ");
 //    for (size_t j = 0; j < 3; j++) {
@@ -2714,9 +2805,16 @@ void MulticopterPositionControl::compute_tautbeta(float dt)
 //    printf("\n");
 
     /** CONTROLLO su thrust max */
+        float am_thr_max = _params.thr_max;
+    /** Saturation of TDO */
+        math::Vector<3> thrust_test = (am_Fxyz + est_torque_dist_test - est_torque_dist)*ControlToActControl_T;
+        if (thrust_test.length() < am_thr_max){
+            am_Fxyz_int   = am_Fxyz_int_test;
+            est_torque_dist = est_torque_dist_test;
+        }
 
     /** Saturation of Integral Action */
-        float am_thr_max = _params.thr_max;
+
         /** Effect of tbeta_dot_ref */
         am_Fxyz_int_add  = am_Fxyz + am_B_tz_tb*am_u_tbeta_int_add;
         /** SATURA?*/
@@ -2726,6 +2824,15 @@ void MulticopterPositionControl::compute_tautbeta(float dt)
         else{
             am_saturation_utb_thrust_Fxyz = false;
         }
+
+
+        if (ControlToActControl_T*(am_Fxyz_int_add.length())>am_thr_max){
+            am_saturation_utb_thrust_Fxyz = true;
+        }
+        else{
+            am_saturation_utb_thrust_Fxyz = false;
+        }
+
     return;
 }
 
